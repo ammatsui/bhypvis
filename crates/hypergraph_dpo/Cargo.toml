@@ -1,0 +1,8 @@
+[package]
+name = "hypergraph_dpo"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "hypergraph_dpo"
+path = "src/lib.rs"
