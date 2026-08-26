@@ -7,6 +7,7 @@ use std::fmt::Write;
 use std::collections::HashSet;
 
 use crate::bhyp::{BHyp, BHyp_with_interface, Label, NodeId, EdgeId, SourceWithBinding};
+use crate::categorical::{BHypMorphism, PushoutResult, DPOResult};
 
 /// Configuration options for DOT visualization
 #[derive(Debug, Clone)]
@@ -437,6 +438,332 @@ pub fn bhyp_with_interface_to_dot_labeled(bhyp_i: &BHyp_with_interface) -> Strin
 /// Convenience function for BHyp_with_interface unlabeled
 pub fn bhyp_with_interface_to_dot_unlabeled(bhyp_i: &BHyp_with_interface) -> String {
     bhyp_with_interface_to_dot(bhyp_i, &DotConfig::unlabeled())
+}
+
+// ============================================================================
+// Categorical Visualization: Morphisms, Pushouts, and DPO
+// ============================================================================
+
+/// Generate DOT representation for a morphism between two BHyp objects
+/// Shows domain and codomain as side-by-side subgraphs with mapping arrows
+pub fn morphism_to_dot(morphism: &BHypMorphism, config: &DotConfig) -> String {
+    let mut dot = String::new();
+
+    writeln!(dot, "digraph Morphism {{").unwrap();
+    writeln!(dot, "  fontname=\"{}\"", config.font_name).unwrap();
+    writeln!(dot, "  rankdir=LR;").unwrap();
+    writeln!(dot, "  compound=true;").unwrap();
+    writeln!(dot).unwrap();
+
+    // Left subgraph: Domain
+    writeln!(dot, "  subgraph cluster_domain {{").unwrap();
+    writeln!(dot, "    label=\"Domain\";").unwrap();
+    writeln!(dot, "    style=filled;").unwrap();
+    writeln!(dot, "    fillcolor=lightblue;").unwrap();
+    writeln!(dot, "    node [fontname=\"{}\", fontsize={}];", config.font_name, config.font_size).unwrap();
+
+    let domain = morphism.domain();
+    for &node in domain.nodes() {
+        let label = format!("d{}", node.0);
+        writeln!(
+            dot,
+            "    d{} [label=\"{}\", shape=circle, style=filled, fillcolor=white, width=0.3, height=0.3, fixedsize=true];",
+            node.0, label
+        ).unwrap();
+    }
+
+    for &edge in domain.edges() {
+        let label = domain.get_label(edge)
+            .map(|l| format_label(l))
+            .unwrap_or_else(|| format!("e{}", edge.0));
+        writeln!(
+            dot,
+            "    de{} [label=\"{}\", shape=box, style=rounded];",
+            edge.0, label
+        ).unwrap();
+    }
+
+    for &edge in domain.edges() {
+        if let Some(swbs) = domain.get_sources_with_binding(edge) {
+            for swb in swbs {
+                writeln!(dot, "    d{} -> de{};", swb.source.0, edge.0).unwrap();
+            }
+        }
+        if let Some(targets) = domain.get_targets(edge) {
+            for t in targets {
+                writeln!(dot, "    de{} -> d{};", edge.0, t.0).unwrap();
+            }
+        }
+    }
+
+    writeln!(dot, "  }}").unwrap();
+    writeln!(dot).unwrap();
+
+    // Right subgraph: Codomain
+    writeln!(dot, "  subgraph cluster_codomain {{").unwrap();
+    writeln!(dot, "    label=\"Codomain\";").unwrap();
+    writeln!(dot, "    style=filled;").unwrap();
+    writeln!(dot, "    fillcolor=lightcoral;").unwrap();
+    writeln!(dot, "    node [fontname=\"{}\", fontsize={}];", config.font_name, config.font_size).unwrap();
+
+    let codomain = morphism.codomain();
+    for &node in codomain.nodes() {
+        let label = format!("c{}", node.0);
+        writeln!(
+            dot,
+            "    c{} [label=\"{}\", shape=circle, style=filled, fillcolor=white, width=0.3, height=0.3, fixedsize=true];",
+            node.0, label
+        ).unwrap();
+    }
+
+    for &edge in codomain.edges() {
+        let label = codomain.get_label(edge)
+            .map(|l| format_label(l))
+            .unwrap_or_else(|| format!("e{}", edge.0));
+        writeln!(
+            dot,
+            "    ce{} [label=\"{}\", shape=box, style=rounded];",
+            edge.0, label
+        ).unwrap();
+    }
+
+    for &edge in codomain.edges() {
+        if let Some(swbs) = codomain.get_sources_with_binding(edge) {
+            for swb in swbs {
+                writeln!(dot, "    c{} -> ce{};", swb.source.0, edge.0).unwrap();
+            }
+        }
+        if let Some(targets) = codomain.get_targets(edge) {
+            for t in targets {
+                writeln!(dot, "    ce{} -> c{};", edge.0, t.0).unwrap();
+            }
+        }
+    }
+
+    writeln!(dot, "  }}").unwrap();
+    writeln!(dot).unwrap();
+
+    // Mapping arrows
+    writeln!(dot, "  // Function arrows (node mappings)").unwrap();
+    for (&domain_node, &codomain_node) in morphism.on_nodes() {
+        writeln!(
+            dot,
+            "  d{} -> c{} [style=dashed, color=green, ltail=cluster_domain, lhead=cluster_codomain];",
+            domain_node.0, codomain_node.0
+        ).unwrap();
+    }
+
+    writeln!(dot, "}}").unwrap();
+    dot
+}
+
+/// Generate DOT representation for a pushout square
+/// Shows the four objects and four morphisms in a square arrangement
+pub fn pushout_to_dot(
+    c: &BHyp,
+    a: &BHyp,
+    b: &BHyp,
+    pushout_result: &PushoutResult,
+    config: &DotConfig,
+) -> String {
+    let mut dot = String::new();
+
+    writeln!(dot, "digraph PushoutSquare {{").unwrap();
+    writeln!(dot, "  fontname=\"{}\"", config.font_name).unwrap();
+    writeln!(dot, "  rankdir=LR;").unwrap();
+    writeln!(dot, "  compound=true;").unwrap();
+    writeln!(dot, "  node [fontname=\"{}\", fontsize={}];", config.font_name, config.font_size).unwrap();
+    writeln!(dot).unwrap();
+
+    // Define graph clusters for each object
+    let graph_clusters = vec![
+        ("C (pullback)", c, "lightgreen", 0),
+        ("A", a, "lightblue", 1),
+        ("B", b, "lightyellow", 2),
+        ("P (pushout)", &pushout_result.pushout, "lightcoral", 3),
+    ];
+
+    for (name, bhyp, color, idx) in graph_clusters {
+        writeln!(dot, "  subgraph cluster_{} {{", idx).unwrap();
+        writeln!(dot, "    label=\"{}\";", name).unwrap();
+        writeln!(dot, "    style=filled;").unwrap();
+        writeln!(dot, "    fillcolor={};", color).unwrap();
+        writeln!(dot, "    node [shape=circle, style=filled, fillcolor=white];").unwrap();
+
+        for &node in bhyp.nodes() {
+            writeln!(dot, "    n{}_{} [label=\"\"];", idx, node.0).unwrap();
+        }
+
+        writeln!(dot, "  }}").unwrap();
+        writeln!(dot).unwrap();
+    }
+
+    // Morphism arrows
+    writeln!(dot, "  // Morphisms").unwrap();
+    writeln!(dot, "  n0_0 -> n1_0 [label=\"f: C→A\"];").unwrap();
+    writeln!(dot, "  n0_0 -> n2_0 [label=\"g: C→B\"];").unwrap();
+    writeln!(dot, "  n1_0 -> n3_0 [label=\"f': A→P\"];").unwrap();
+    writeln!(dot, "  n2_0 -> n3_0 [label=\"g': B→P\"];").unwrap();
+
+    writeln!(dot, "}}").unwrap();
+    dot
+}
+
+/// Generate DOT representation for a DPO (Double Pushout) rewriting step
+/// Shows the five-object configuration: L, K, R, G, D, H
+pub fn dpo_to_dot(
+    left: &BHyp,
+    interface: &BHyp,
+    right: &BHyp,
+    host: &BHyp,
+    dpo_result: &DPOResult,
+    config: &DotConfig,
+) -> String {
+    let mut dot = String::new();
+
+    writeln!(dot, "digraph DPO {{").unwrap();
+    writeln!(dot, "  fontname=\"{}\"", config.font_name).unwrap();
+    writeln!(dot, "  rankdir=LR;").unwrap();
+    writeln!(dot, "  compound=true;").unwrap();
+    writeln!(dot, "  node [fontname=\"{}\", fontsize={}];", config.font_name, config.font_size).unwrap();
+    writeln!(dot).unwrap();
+
+    // Arrange objects: top row (L, K, R), bottom row (G, D, H)
+    let objects = vec![
+        ("L (LHS)", left, "lightblue", "cluster_L", 0, 0),
+        ("K (Interface)", interface, "lightgreen", "cluster_K", 1, 0),
+        ("R (RHS)", right, "lightcyan", "cluster_R", 2, 0),
+        ("G (Host)", host, "lightyellow", "cluster_G", 0, 1),
+        ("D (Complement)", &dpo_result.complement, "lightcoral", "cluster_D", 1, 1),
+        ("H (Result)", &dpo_result.result, "plum", "cluster_H", 2, 1),
+    ];
+
+    for (name, bhyp, color, cluster, _, _) in &objects {
+        writeln!(dot, "  subgraph {} {{", cluster).unwrap();
+        writeln!(dot, "    label=\"{}\";", name).unwrap();
+        writeln!(dot, "    style=filled;").unwrap();
+        writeln!(dot, "    fillcolor={};", color).unwrap();
+        writeln!(dot, "    node [shape=circle, style=filled, fillcolor=white];").unwrap();
+
+        for &node in bhyp.nodes() {
+            writeln!(dot, "    n{} [label=\"\"];", node.0).unwrap();
+        }
+
+        writeln!(dot, "  }}").unwrap();
+        writeln!(dot).unwrap();
+    }
+
+    // Morphism arrows
+    writeln!(dot, "  // Left interface embedding (l: K → L)").unwrap();
+    writeln!(dot, "  n0_0 -> n1_0 [label=\"l\"];").unwrap();
+
+    writeln!(dot, "  // Right interface embedding (r: K → R)").unwrap();
+    writeln!(dot, "  n2_0 -> n1_0 [label=\"r\", constraint=false];").unwrap();
+
+    writeln!(dot, "  // Match morphism (match: L → G)").unwrap();
+    writeln!(dot, "  n0_0 -> n3_0 [label=\"match\"];").unwrap();
+
+    writeln!(dot, "  // Pushout complement (d: K → D)").unwrap();
+    writeln!(dot, "  n1_0 -> n4_0 [label=\"d\"];").unwrap();
+
+    writeln!(dot, "  // Pushout: complement to result (K → D → H)").unwrap();
+    writeln!(dot, "  n4_0 -> n5_0 [label=\"d'\"];").unwrap();
+
+    writeln!(dot, "  // Right morphism to result (r': R → H)").unwrap();
+    writeln!(dot, "  n2_0 -> n5_0 [label=\"r'\"];").unwrap();
+
+    writeln!(dot, "  // Intermediate (G → D)").unwrap();
+    writeln!(dot, "  n3_0 -> n4_0 [label=\"g_D\", style=dashed];").unwrap();
+
+    writeln!(dot, "}}").unwrap();
+    dot
+}
+
+/// Generate a simplified DPO diagram showing just the cospan structure
+pub fn dpo_cospan_to_dot(
+    left: &BHyp,
+    interface: &BHyp,
+    right: &BHyp,
+    host: &BHyp,
+    result: &BHyp,
+) -> String {
+    let mut dot = String::new();
+
+    writeln!(dot, "digraph DPOCospan {{").unwrap();
+    writeln!(dot, "  rankdir=LR;").unwrap();
+    writeln!(dot, "  node [shape=box, style=filled];").unwrap();
+    writeln!(dot).unwrap();
+
+    // Five boxes representing the objects
+    writeln!(
+        dot,
+        "  L [label=\"L\\n({} nodes, {} edges)\", fillcolor=lightblue];",
+        left.nodes().len(),
+        left.edges().len()
+    ).unwrap();
+    writeln!(
+        dot,
+        "  K [label=\"K (interface)\\n({} nodes)\", fillcolor=lightgreen];",
+        interface.nodes().len()
+    ).unwrap();
+    writeln!(
+        dot,
+        "  R [label=\"R\\n({} nodes, {} edges)\", fillcolor=lightcyan];",
+        right.nodes().len(),
+        right.edges().len()
+    ).unwrap();
+    writeln!(
+        dot,
+        "  G [label=\"G (host)\\n({} nodes, {} edges)\", fillcolor=lightyellow];",
+        host.nodes().len(),
+        host.edges().len()
+    ).unwrap();
+    writeln!(
+        dot,
+        "  H [label=\"H (result)\\n({} nodes, {} edges)\", fillcolor=plum];",
+        result.nodes().len(),
+        result.edges().len()
+    ).unwrap();
+
+    writeln!(dot).unwrap();
+
+    // Rule: K → L ← K → R (or L ← K → R)
+    writeln!(dot, "  K -> L [label=\"l\"];").unwrap();
+    writeln!(dot, "  K -> R [label=\"r\"];").unwrap();
+
+    // Rewriting: L → G and R → H (via intermediate D)
+    writeln!(dot, "  L -> G [label=\"match\"];").unwrap();
+    writeln!(dot, "  R -> H [label=\"\", style=dashed];").unwrap();
+    writeln!(dot, "  G -> H [label=\"result\", style=dotted];").unwrap();
+
+    writeln!(dot, "}}").unwrap();
+    dot
+}
+
+/// Convenience function to generate morphism DOT
+pub fn morphism_to_dot_labeled(morphism: &BHypMorphism) -> String {
+    morphism_to_dot(morphism, &DotConfig::default())
+}
+
+/// Convenience function to generate pushout DOT
+pub fn pushout_to_dot_labeled(
+    c: &BHyp,
+    a: &BHyp,
+    b: &BHyp,
+    pushout_result: &PushoutResult,
+) -> String {
+    pushout_to_dot(c, a, b, pushout_result, &DotConfig::default())
+}
+
+/// Convenience function to generate DPO DOT
+pub fn dpo_to_dot_labeled(
+    left: &BHyp,
+    interface: &BHyp,
+    right: &BHyp,
+    host: &BHyp,
+    dpo_result: &DPOResult,
+) -> String {
+    dpo_to_dot(left, interface, right, host, dpo_result, &DotConfig::default())
 }
 
 fn format_label(label: &Label) -> String {

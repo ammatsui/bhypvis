@@ -1,0 +1,52 @@
+digraph PushoutSquare {
+  fontname="Helvetica"
+  rankdir=LR;
+  compound=true;
+  node [fontname="Helvetica", fontsize=12];
+
+  subgraph cluster_0 {
+    label="C (pullback)";
+    style=filled;
+    fillcolor=lightgreen;
+    node [shape=circle, style=filled, fillcolor=white];
+    n0_0 [label=""];
+  }
+
+  subgraph cluster_1 {
+    label="A";
+    style=filled;
+    fillcolor=lightblue;
+    node [shape=circle, style=filled, fillcolor=white];
+    n1_0 [label=""];
+    n1_1 [label=""];
+    n1_2 [label=""];
+  }
+
+  subgraph cluster_2 {
+    label="B";
+    style=filled;
+    fillcolor=lightyellow;
+    node [shape=circle, style=filled, fillcolor=white];
+    n2_0 [label=""];
+    n2_2 [label=""];
+    n2_1 [label=""];
+  }
+
+  subgraph cluster_3 {
+    label="P (pushout)";
+    style=filled;
+    fillcolor=lightcoral;
+    node [shape=circle, style=filled, fillcolor=white];
+    n3_2 [label=""];
+    n3_4 [label=""];
+    n3_0 [label=""];
+    n3_3 [label=""];
+    n3_1 [label=""];
+  }
+
+  // Morphisms
+  n0_0 -> n1_0 [label="f: C→A"];
+  n0_0 -> n2_0 [label="g: C→B"];
+  n1_0 -> n3_0 [label="f': A→P"];
+  n2_0 -> n3_0 [label="g': B→P"];
+}

@@ -1,0 +1,77 @@
+digraph DPO {
+  fontname="Helvetica"
+  rankdir=LR;
+  compound=true;
+  node [fontname="Helvetica", fontsize=12];
+
+  subgraph cluster_L {
+    label="L (LHS)";
+    style=filled;
+    fillcolor=lightblue;
+    node [shape=circle, style=filled, fillcolor=white];
+    n0 [label=""];
+    n1 [label=""];
+  }
+
+  subgraph cluster_K {
+    label="K (Interface)";
+    style=filled;
+    fillcolor=lightgreen;
+    node [shape=circle, style=filled, fillcolor=white];
+    n0 [label=""];
+    n1 [label=""];
+  }
+
+  subgraph cluster_R {
+    label="R (RHS)";
+    style=filled;
+    fillcolor=lightcyan;
+    node [shape=circle, style=filled, fillcolor=white];
+    n0 [label=""];
+    n1 [label=""];
+  }
+
+  subgraph cluster_G {
+    label="G (Host)";
+    style=filled;
+    fillcolor=lightyellow;
+    node [shape=circle, style=filled, fillcolor=white];
+    n2 [label=""];
+    n0 [label=""];
+    n1 [label=""];
+    n3 [label=""];
+  }
+
+  subgraph cluster_D {
+    label="D (Complement)";
+    style=filled;
+    fillcolor=lightcoral;
+    node [shape=circle, style=filled, fillcolor=white];
+  }
+
+  subgraph cluster_H {
+    label="H (Result)";
+    style=filled;
+    fillcolor=plum;
+    node [shape=circle, style=filled, fillcolor=white];
+    n2 [label=""];
+    n0 [label=""];
+    n1 [label=""];
+    n3 [label=""];
+  }
+
+  // Left interface embedding (l: K → L)
+  n0_0 -> n1_0 [label="l"];
+  // Right interface embedding (r: K → R)
+  n2_0 -> n1_0 [label="r", constraint=false];
+  // Match morphism (match: L → G)
+  n0_0 -> n3_0 [label="match"];
+  // Pushout complement (d: K → D)
+  n1_0 -> n4_0 [label="d"];
+  // Pushout: complement to result (K → D → H)
+  n4_0 -> n5_0 [label="d'"];
+  // Right morphism to result (r': R → H)
+  n2_0 -> n5_0 [label="r'"];
+  // Intermediate (G → D)
+  n3_0 -> n4_0 [label="g_D", style=dashed];
+}

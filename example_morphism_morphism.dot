@@ -1,0 +1,37 @@
+digraph Morphism {
+  fontname="Helvetica"
+  rankdir=LR;
+  compound=true;
+
+  subgraph cluster_domain {
+    label="Domain";
+    style=filled;
+    fillcolor=lightblue;
+    node [fontname="Helvetica", fontsize=12];
+    d1 [label="d1", shape=circle, style=filled, fillcolor=white, width=0.3, height=0.3, fixedsize=true];
+    d0 [label="d0", shape=circle, style=filled, fillcolor=white, width=0.3, height=0.3, fixedsize=true];
+    de0 [label="f", shape=box, style=rounded];
+    d0 -> de0;
+    de0 -> d1;
+  }
+
+  subgraph cluster_codomain {
+    label="Codomain";
+    style=filled;
+    fillcolor=lightcoral;
+    node [fontname="Helvetica", fontsize=12];
+    c1 [label="c1", shape=circle, style=filled, fillcolor=white, width=0.3, height=0.3, fixedsize=true];
+    c0 [label="c0", shape=circle, style=filled, fillcolor=white, width=0.3, height=0.3, fixedsize=true];
+    c2 [label="c2", shape=circle, style=filled, fillcolor=white, width=0.3, height=0.3, fixedsize=true];
+    ce0 [label="f", shape=box, style=rounded];
+    ce1 [label="g", shape=box, style=rounded];
+    c0 -> ce0;
+    ce0 -> c1;
+    c1 -> ce1;
+    ce1 -> c2;
+  }
+
+  // Function arrows (node mappings)
+  d0 -> c0 [style=dashed, color=green, ltail=cluster_domain, lhead=cluster_codomain];
+  d1 -> c1 [style=dashed, color=green, ltail=cluster_domain, lhead=cluster_codomain];
+}
