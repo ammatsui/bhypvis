@@ -1,169 +1,332 @@
+
+
 use std::env;
 use std::fs::File;
 use std::io::Write;
 
-use hypergraph_dpo::bhyp::{BHyp, Label, Signature, SourceWithBinding};
+use hypergraph_dpo::bhyp::{BHyp, BHyp_with_interface, Label, Signature, SourceWithBinding};
+use hypergraph_dpo::visualization::{
+    bhyp_to_dot_labeled, bhyp_to_dot_unlabeled, bhyp_with_interface_to_dot_labeled,
+    bhyp_with_interface_cospan_to_dot, DotConfig,
+};
 
-/// Export a BHyp to a simple Graphviz DOT string (nodes + edge boxes).
-fn export_to_dot(h: &BHyp) -> String {
-	let mut out = String::new();
-	out.push_str("digraph BHyp {\n  rankdir=LR;\n  node [shape=circle];\n\n");
+/// Simple example: function application f(x)
+fn example_simple_function() -> BHyp {
+    let mut g = BHyp::new();
+    let n1 = g.add_node(); // source x
+    let n2 = g.add_node(); // target f(x)
 
-	// Nodes
-	let mut nodes: Vec<_> = h.nodes().iter().cloned().collect();
-	nodes.sort_by_key(|n| n.0);
-	for n in nodes {
-		out.push_str(&format!("  n{} [label=\"{}\"];\n", n.0, n.0));
-	}
-	out.push_str("\n  // edges as boxes\n");
+    g.add_edge(
+        vec![SourceWithBinding {
+            source: n1,
+            bound: vec![],
+        }],
+        vec![n2],
+        Some(Label::Symbol("f".to_string())),
+    )
+    .unwrap();
 
-	// Edges
-	let mut edges: Vec<_> = h.edges().iter().cloned().collect();
-	edges.sort_by_key(|e| e.0);
-	for e in edges {
-		let eid = e.0;
-		let label_text = match h.get_label(e) {
-			Some(Label::Symbol(s)) => s.clone(),
-			Some(Label::Meta(nm, ar)) => format!("{}:{}", nm, ar),
-			Some(Label::Lambda) => "λ".to_string(),
-			Some(Label::None) | None => String::new(),
-		};
-
-		// Build a compact label including binding information
-		let mut edge_lbl = label_text;
-		if let Some(swbs) = h.get_sources_with_binding(e) {
-			let parts: Vec<String> = swbs
-				.iter()
-				.map(|swb| {
-					if swb.bound.is_empty() {
-						format!("s{}", swb.source.0)
-					} else {
-						let bounds: Vec<String> = swb.bound.iter().map(|b| format!("n{}", b.0)).collect();
-						format!("s{}[{}]", swb.source.0, bounds.join(","))
-					}
-				})
-				.collect();
-			if !parts.is_empty() {
-				if !edge_lbl.is_empty() {
-					edge_lbl = format!("{} | {}", edge_lbl, parts.join(" "));
-				} else {
-					edge_lbl = parts.join(" ");
-				}
-			}
-		}
-
-		out.push_str(&format!("  e{} [shape=box, label=\"{}\"];\n", eid, edge_lbl));
-
-		// wire sources -> edge
-		if let Some(swbs) = h.get_sources_with_binding(e) {
-			for swb in swbs {
-				out.push_str(&format!("  n{} -> e{};\n", swb.source.0, eid));
-			}
-		}
-
-		// wire edge -> targets
-		if let Some(targets) = h.get_targets(e) {
-			for t in targets {
-				out.push_str(&format!("  e{} -> n{};\n", eid, t.0));
-			}
-		}
-
-		out.push_str("\n");
-	}
-
-	out.push_str("}\n");
-	out
+    g
 }
 
-/// Simple example graph (no signature)
-fn example_simple() -> BHyp {
-	let mut g = BHyp::new();
-	let n1 = g.add_node();
-	let n2 = g.add_node();
-	let n3 = g.add_node();
+/// Lambda abstraction: λx. f(x)
+fn example_lambda() -> BHyp {
+    let mut g = BHyp::new();
 
-	g.add_edge(
-		vec![SourceWithBinding {
-			source: n1,
-			bound: vec![],
-		}],
-		vec![n2, n3],
-		Some(Label::Symbol("f".to_string())),
-	)
-	.unwrap();
+    let x = g.add_node(); // bound variable
+    let f_node = g.add_node(); // output of f(x)
+    let lambda_out = g.add_node(); // output of λx.f(x)
 
-	g
+    // f(x)
+    g.add_edge(
+        vec![SourceWithBinding {
+            source: x,
+            bound: vec![],
+        }],
+        vec![f_node],
+        Some(Label::Symbol("f".to_string())),
+    )
+    .unwrap();
+
+    // λx binds x
+    g.add_edge(
+        vec![SourceWithBinding {
+            source: f_node,
+            bound: vec![x],
+        }],
+        vec![lambda_out],
+        Some(Label::Symbol("λ".to_string())),
+    )
+    .unwrap();
+
+    g
 }
 
-/// Example with a small signature and a lambda-like binding
-fn example_lambda_with_signature() -> BHyp {
-	let mut sig = Signature::new();
-	sig.add_symbol("λ".to_string(), vec![1]);
+/// Higher-order example: λx. λy. f(x, y)
+fn example_curried() -> BHyp {
+    let mut sig = Signature::new();
+    sig.add_symbol("λ".to_string(), vec![1]);
+    sig.add_symbol("f".to_string(), vec![0, 0]); // f takes 2 arguments with no bindings
 
-	let mut g = BHyp::with_signature(sig);
+    let mut g = BHyp::with_signature(sig);
 
-	let x = g.add_node();
-	let f_node = g.add_node();
-	let lambda_out = g.add_node();
+    let x = g.add_node(); // first bound variable
+    let y = g.add_node(); // second bound variable
+    let f_node = g.add_node(); // output of f(x, y)
+    let lambda_y = g.add_node(); // output of λy.f(x, y)
+    let lambda_x = g.add_node(); // output of λx.λy.f(x, y)
 
-	g.add_edge(
-		vec![SourceWithBinding {
-			source: x,
-			bound: vec![],
-		}],
-		vec![f_node],
-		Some(Label::Symbol("f".to_string())),
-	)
-	.unwrap();
+    // f(x, y)
+    g.add_edge(
+        vec![
+            SourceWithBinding {
+                source: x,
+                bound: vec![],
+            },
+            SourceWithBinding {
+                source: y,
+                bound: vec![],
+            },
+        ],
+        vec![f_node],
+        Some(Label::Symbol("f".to_string())),
+    )
+    .unwrap();
 
-	g.add_edge(
-		vec![SourceWithBinding {
-			source: f_node,
-			bound: vec![x],
-		}],
-		vec![lambda_out],
-		Some(Label::Lambda),
-	)
-	.unwrap();
+    // λy binds y
+    g.add_edge(
+        vec![SourceWithBinding {
+            source: f_node,
+            bound: vec![y],
+        }],
+        vec![lambda_y],
+        Some(Label::Symbol("λ".to_string())),
+    )
+    .unwrap();
 
-	g
+    // λx binds x
+    g.add_edge(
+        vec![SourceWithBinding {
+            source: lambda_y,
+            bound: vec![x],
+        }],
+        vec![lambda_x],
+        Some(Label::Symbol("λ".to_string())),
+    )
+    .unwrap();
+
+    g
 }
 
-fn usage(program: &str) {
-	eprintln!("Usage: {} [simple|lambda] [out.dot]", program);
+/// Complex example with metavariable
+fn example_with_metavariable() -> BHyp {
+    let mut g = BHyp::new();
+
+    let n1 = g.add_node();
+    let n2 = g.add_node();
+    let n3 = g.add_node();
+    let n4 = g.add_node();
+
+    // Regular edge
+    g.add_edge(
+        vec![SourceWithBinding {
+            source: n1,
+            bound: vec![],
+        }],
+        vec![n2],
+        Some(Label::Symbol("f".to_string())),
+    )
+    .unwrap();
+
+    // Metavariable edge (arity 1, coarity 1)
+    g.add_edge(
+        vec![SourceWithBinding {
+            source: n2,
+            bound: vec![],
+        }],
+        vec![n3],
+        Some(Label::Meta("M".to_string(), 1)),
+    )
+    .unwrap();
+
+    // Another regular edge
+    g.add_edge(
+        vec![SourceWithBinding {
+            source: n3,
+            bound: vec![],
+        }],
+        vec![n4],
+        Some(Label::Symbol("g".to_string())),
+    )
+    .unwrap();
+
+    g
+}
+
+/// Example with BHyp_with_interface (cospan)
+fn example_with_interface() -> BHyp_with_interface {
+    let mut g = BHyp_with_interface::new();
+
+    let n1 = g.add_node(); // will be input
+    let n2 = g.add_node(); // internal
+    let n3 = g.add_node(); // will be output
+
+    g.add_edge(
+        vec![SourceWithBinding {
+            source: n1,
+            bound: vec![],
+        }],
+        vec![n2],
+        Some(Label::Symbol("f".to_string())),
+    )
+    .unwrap();
+
+    g.add_edge(
+        vec![SourceWithBinding {
+            source: n2,
+            bound: vec![],
+        }],
+        vec![n3],
+        Some(Label::Symbol("g".to_string())),
+    )
+    .unwrap();
+
+    g
+}
+
+/// Export example to DOT file
+fn export_bhyp(name: &str, bhyp: &BHyp, labeled: bool) {
+    let dot = if labeled {
+        bhyp_to_dot_labeled(bhyp)
+    } else {
+        bhyp_to_dot_unlabeled(bhyp)
+    };
+
+    let filename = format!("{}.dot", name);
+    match File::create(&filename) {
+        Ok(mut f) => {
+            if let Err(e) = f.write_all(dot.as_bytes()) {
+                eprintln!("Failed to write {}: {}", filename, e);
+            } else {
+                println!("✓ Exported {} to {}", name, filename);
+            }
+        }
+        Err(e) => eprintln!("Failed to create {}: {}", filename, e),
+    }
+}
+
+/// Export BHyp_with_interface to DOT file (both detailed and cospan views)
+fn export_bhyp_with_interface(name: &str, bhyp_i: &BHyp_with_interface) {
+    // Detailed view
+    let dot = bhyp_with_interface_to_dot_labeled(bhyp_i);
+    let filename = format!("{}_detailed.dot", name);
+    match File::create(&filename) {
+        Ok(mut f) => {
+            if let Err(e) = f.write_all(dot.as_bytes()) {
+                eprintln!("Failed to write {}: {}", filename, e);
+            } else {
+                println!("✓ Exported {} detailed view to {}", name, filename);
+            }
+        }
+        Err(e) => eprintln!("Failed to create {}: {}", filename, e),
+    }
+
+    // Cospan view
+    let dot = bhyp_with_interface_cospan_to_dot(bhyp_i, &DotConfig::default());
+    let filename = format!("{}_cospan.dot", name);
+    match File::create(&filename) {
+        Ok(mut f) => {
+            if let Err(e) = f.write_all(dot.as_bytes()) {
+                eprintln!("Failed to write {}: {}", filename, e);
+            } else {
+                println!("✓ Exported {} cospan view to {}", name, filename);
+            }
+        }
+        Err(e) => eprintln!("Failed to create {}: {}", filename, e),
+    }
+}
+
+fn print_usage(prog: &str) {
+    eprintln!("Usage: {} [all|simple|lambda|curried|metavar|interface]", prog);
+    eprintln!();
+    eprintln!("Examples:");
+    eprintln!("  {} simple      - Simple function application f(x)", prog);
+    eprintln!("  {} lambda      - Lambda abstraction λx.f(x)", prog);
+    eprintln!("  {} curried     - Curried function λx.λy.f(x,y)", prog);
+    eprintln!("  {} metavar     - Example with metavariable", prog);
+    eprintln!("  {} interface   - Hypergraph with interface (cospan)", prog);
+    eprintln!("  {} all         - Run all examples", prog);
 }
 
 fn main() {
-	let mut args: Vec<String> = env::args().collect();
-	let prog = args.get(0).map(|s| s.as_str()).unwrap_or("bhyp-example");
+    let args: Vec<String> = env::args().collect();
+    let prog = args.get(0).map(|s| s.as_str()).unwrap_or("bhyp-vis");
+    let example = args.get(1).map(|s| s.as_str()).unwrap_or("all");
 
-	// Defaults
-	let example = args.get(1).map(|s| s.as_str()).unwrap_or("simple");
-	let out_path = args.get(2).map(|s| s.as_str()).unwrap_or("example.dot");
+    match example {
+        "simple" => {
+            let bhyp = example_simple_function();
+            println!("\n=== Simple Function Application: f(x) ===");
+            println!("{}", bhyp);
+            export_bhyp("example_simple", &bhyp, true);
+        }
+        "lambda" => {
+            let bhyp = example_lambda();
+            println!("\n=== Lambda Abstraction: λx.f(x) ===");
+            println!("{}", bhyp);
+            export_bhyp("example_lambda", &bhyp, true);
+        }
+        "curried" => {
+            let bhyp = example_curried();
+            println!("\n=== Curried Function: λx.λy.f(x,y) ===");
+            println!("{}", bhyp);
+            export_bhyp("example_curried", &bhyp, true);
+        }
+        "metavar" => {
+            let bhyp = example_with_metavariable();
+            println!("\n=== Example with Metavariable ===");
+            println!("{}", bhyp);
+            export_bhyp("example_metavar", &bhyp, true);
+        }
+        "interface" => {
+            let bhyp_i = example_with_interface();
+            println!("\n=== Hypergraph with Interface (Cospan) ===");
+            println!("{}", bhyp_i);
+            export_bhyp_with_interface("example_interface", &bhyp_i);
+        }
+        "all" => {
+            println!("Running all BHyp visualization examples...\n");
 
-	let hyp = match example {
-		"simple" => example_simple(),
-		"lambda" => example_lambda_with_signature(),
-		_ => {
-			usage(prog);
-			return;
-		}
-	};
+            let bhyp = example_simple_function();
+            println!("=== Simple Function Application: f(x) ===");
+            println!("{}\n", bhyp);
+            export_bhyp("example_simple", &bhyp, true);
 
-	// Print a quick textual representation
-	println!("{}", hyp);
+            let bhyp = example_lambda();
+            println!("\n=== Lambda Abstraction: λx.f(x) ===");
+            println!("{}\n", bhyp);
+            export_bhyp("example_lambda", &bhyp, true);
 
-	// Export DOT
-	let dot = export_to_dot(&hyp);
-	match File::create(out_path) {
-		Ok(mut f) => {
-			if let Err(e) = f.write_all(dot.as_bytes()) {
-				eprintln!("Failed to write {}: {}", out_path, e);
-			} else {
-				println!("Wrote DOT to {}", out_path);
-			}
-		}
-		Err(e) => eprintln!("Failed to create {}: {}", out_path, e),
-	}
+            let bhyp = example_curried();
+            println!("\n=== Curried Function: λx.λy.f(x,y) ===");
+            println!("{}\n", bhyp);
+            export_bhyp("example_curried", &bhyp, true);
+
+            let bhyp = example_with_metavariable();
+            println!("\n=== Example with Metavariable ===");
+            println!("{}\n", bhyp);
+            export_bhyp("example_metavar", &bhyp, true);
+
+            let bhyp_i = example_with_interface();
+            println!("\n=== Hypergraph with Interface (Cospan) ===");
+            println!("{}\n", bhyp_i);
+            export_bhyp_with_interface("example_interface", &bhyp_i);
+
+            println!("\n✓ All examples exported successfully!");
+        }
+        _ => {
+            eprintln!("Unknown example: {}", example);
+            print_usage(prog);
+        }
+    }
 }
-

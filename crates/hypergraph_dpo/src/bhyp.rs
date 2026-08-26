@@ -416,11 +416,6 @@ impl fmt::Display for BHyp {
     }
 }
 
-
-
-use std::collections::HashSet;
-use std::fmt;
-
 /// A hypergraph with binding with interface (cospan I_G → G ← O_G)
 /// The interface is automatically computed based on in/out degrees and binding
 #[derive(Debug, Clone)]
