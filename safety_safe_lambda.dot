@@ -11,15 +11,15 @@ digraph G {
   n2 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
 
   // Hyperedges
-  e0 [label="f", shape=box, style=rounded, color="black"];
   e1 [label="λ", shape=box, style=rounded, color="black"];
+  e0 [label="f", shape=box, style=rounded, color="black"];
 
   // Source connections
-  n0 -> e0 [label=""];
   n1 -> e1 [label=""];
   n0 -> e1 [style=dashed, color="blue", constraint=false, label="b0,0"];
+  n0 -> e0 [label=""];
 
   // Target connections
-  e0 -> n1 [label=""];
   e1 -> n2 [label=""];
+  e0 -> n1 [label=""];
 }

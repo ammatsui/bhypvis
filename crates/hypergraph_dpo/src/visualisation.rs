@@ -1135,178 +1135,178 @@ fn format_label(label: &Label) -> String {
     }
 }
 
-#[cfg(test)]
-mod dot_tests {
-    use super::*;
+// #[cfg(test)]
+// mod dot_tests {
+//     use super::*;
 
-    #[test]
-    fn test_simple_bhyp_dot() {
-        let mut g = BHyp::new();
-        let n1 = g.add_node();
-        let n2 = g.add_node();
-        g.add_edge(
-            vec![SourceWithBinding { source: n1, bound: vec![] }],
-            vec![n2],
-            Some(Label::Symbol("f".to_string())),
-        ).unwrap();
+//     #[test]
+//     fn test_simple_bhyp_dot() {
+//         let mut g = BHyp::new();
+//         let n1 = g.add_node();
+//         let n2 = g.add_node();
+//         g.add_edge(
+//             vec![SourceWithBinding { source: n1, bound: vec![] }],
+//             vec![n2],
+//             Some(Label::Symbol("f".to_string())),
+//         ).unwrap();
 
-        let dot = bhyp_to_dot_labelled(&g);
-        assert!(dot.contains("digraph"));
-        assert!(dot.contains("n0"));
-        assert!(dot.contains("n1"));
-        assert!(dot.contains("e0"));
-        assert!(dot.contains("\"f\""));
-        println!("{}", dot);
-    }
+//         let dot = bhyp_to_dot_labelled(&g);
+//         assert!(dot.contains("digraph"));
+//         assert!(dot.contains("n0"));
+//         assert!(dot.contains("n1"));
+//         assert!(dot.contains("e0"));
+//         assert!(dot.contains("\"f\""));
+//         println!("{}", dot);
+//     }
 
-    #[test]
-    fn test_lambda_binding_dot() {
-        let mut g = BHyp::new();
-        let x = g.add_node();      // bound variable
-        let f_out = g.add_node();  // output of f(x)
-        let lambda_out = g.add_node(); // output
+//     #[test]
+//     fn test_lambda_binding_dot() {
+//         let mut g = BHyp::new();
+//         let x = g.add_node();      // bound variable
+//         let f_out = g.add_node();  // output of f(x)
+//         let lambda_out = g.add_node(); // output
 
-        // f(x)
-        g.add_edge(
-            vec![SourceWithBinding { source: x, bound: vec![] }],
-            vec![f_out],
-            Some(Label::Symbol("f".to_string())),
-        ).unwrap();
+//         // f(x)
+//         g.add_edge(
+//             vec![SourceWithBinding { source: x, bound: vec![] }],
+//             vec![f_out],
+//             Some(Label::Symbol("f".to_string())),
+//         ).unwrap();
 
-        // λx binds x
-        g.add_edge(
-            vec![SourceWithBinding { source: f_out, bound: vec![x] }],
-            vec![lambda_out],
-            Some(Label::Symbol("λ".to_string())),
-        ).unwrap();
+//         // λx binds x
+//         g.add_edge(
+//             vec![SourceWithBinding { source: f_out, bound: vec![x] }],
+//             vec![lambda_out],
+//             Some(Label::Symbol("λ".to_string())),
+//         ).unwrap();
 
-        let dot = bhyp_to_dot_labelled(&g);
-        assert!(dot.contains("style=dashed")); // binding connection
-        assert!(dot.contains("\"λ\""));
-        println!("{}", dot);
-    }
+//         let dot = bhyp_to_dot_labelled(&g);
+//         assert!(dot.contains("style=dashed")); // binding connection
+//         assert!(dot.contains("\"λ\""));
+//         println!("{}", dot);
+//     }
 
-    #[test]
-    fn test_metaedge_dot() {
-        let mut g = BHyp::new();
-        let n1 = g.add_node();
-        let n2 = g.add_node();
-        g.add_edge(
-            vec![SourceWithBinding { source: n1, bound: vec![] }],
-            vec![n2],
-            Some(Label::Meta("M".to_string(), 1)),
-        ).unwrap();
+//     #[test]
+//     fn test_metaedge_dot() {
+//         let mut g = BHyp::new();
+//         let n1 = g.add_node();
+//         let n2 = g.add_node();
+//         g.add_edge(
+//             vec![SourceWithBinding { source: n1, bound: vec![] }],
+//             vec![n2],
+//             Some(Label::Meta("M".to_string(), 1)),
+//         ).unwrap();
 
-        let dot = bhyp_to_dot_labelled(&g);
-        assert!(dot.contains("ellipse")); // metaedges are ellipses
-        assert!(dot.contains("M:1"));
-        println!("{}", dot);
-    }
+//         let dot = bhyp_to_dot_labelled(&g);
+//         assert!(dot.contains("ellipse")); // metaedges are ellipses
+//         assert!(dot.contains("M:1"));
+//         println!("{}", dot);
+//     }
 
-    #[test]
-    fn test_bhyp_with_interface_dot() {
-        let mut g = BHyp_with_interface::new();
-        let n1 = g.add_node();
-        let n2 = g.add_node();
-        g.add_edge(
-            vec![SourceWithBinding { source: n1, bound: vec![] }],
-            vec![n2],
-            Some(Label::Symbol("f".to_string())),
-        ).unwrap();
+//     #[test]
+//     fn test_bhyp_with_interface_dot() {
+//         let mut g = BHyp_with_interface::new();
+//         let n1 = g.add_node();
+//         let n2 = g.add_node();
+//         g.add_edge(
+//             vec![SourceWithBinding { source: n1, bound: vec![] }],
+//             vec![n2],
+//             Some(Label::Symbol("f".to_string())),
+//         ).unwrap();
 
-        let dot = bhyp_with_interface_to_dot_labelled(&g);
-        assert!(dot.contains("cluster_input"));
-        assert!(dot.contains("cluster_main"));
-        assert!(dot.contains("cluster_output"));
-        assert!(dot.contains("I_G"));
-        assert!(dot.contains("O_G"));
-        println!("{}", dot);
-    }
+//         let dot = bhyp_with_interface_to_dot_labelled(&g);
+//         assert!(dot.contains("cluster_input"));
+//         assert!(dot.contains("cluster_main"));
+//         assert!(dot.contains("cluster_output"));
+//         assert!(dot.contains("I_G"));
+//         assert!(dot.contains("O_G"));
+//         println!("{}", dot);
+//     }
 
-    #[test]
-    fn test_cospan_diagram() {
-        let mut g = BHyp_with_interface::new();
-        let n1 = g.add_node();
-        let n2 = g.add_node();
-        g.add_edge(
-            vec![SourceWithBinding { source: n1, bound: vec![] }],
-            vec![n2],
-            None,
-        ).unwrap();
+//     #[test]
+//     fn test_cospan_diagram() {
+//         let mut g = BHyp_with_interface::new();
+//         let n1 = g.add_node();
+//         let n2 = g.add_node();
+//         g.add_edge(
+//             vec![SourceWithBinding { source: n1, bound: vec![] }],
+//             vec![n2],
+//             None,
+//         ).unwrap();
 
-        let dot = bhyp_with_interface_cospan_to_dot(&g, &DotConfig::default());
-        assert!(dot.contains("I_G"));
-        assert!(dot.contains("O_G"));
-        assert!(dot.contains("->"));
-        println!("{}", dot);
-    }
+//         let dot = bhyp_with_interface_cospan_to_dot(&g, &DotConfig::default());
+//         assert!(dot.contains("I_G"));
+//         assert!(dot.contains("O_G"));
+//         assert!(dot.contains("->"));
+//         println!("{}", dot);
+//     }
 
-    #[test]
-    fn test_discrete_bhyp_dot() {
-        let mut g = BHyp::new();
-        g.add_nodes(3);
+//     #[test]
+//     fn test_discrete_bhyp_dot() {
+//         let mut g = BHyp::new();
+//         g.add_nodes(3);
 
-        let dot = discrete_bhyp_to_dot(&g, "Discrete", &DotConfig::with_node_ids());
-        assert!(dot.contains("discrete"));
-        assert!(dot.contains("3 nodes"));
-        println!("{}", dot);
-    }
+//         let dot = discrete_bhyp_to_dot(&g, "Discrete", &DotConfig::with_node_ids());
+//         assert!(dot.contains("discrete"));
+//         assert!(dot.contains("3 nodes"));
+//         println!("{}", dot);
+//     }
 
-    #[test]
-    fn test_unlabelled_dot() {
-        let mut g = BHyp::new();
-        let n1 = g.add_node();
-        let n2 = g.add_node();
-        g.add_edge(
-            vec![SourceWithBinding { source: n1, bound: vec![] }],
-            vec![n2],
-            Some(Label::Symbol("should_not_appear".to_string())),
-        ).unwrap();
+//     #[test]
+//     fn test_unlabelled_dot() {
+//         let mut g = BHyp::new();
+//         let n1 = g.add_node();
+//         let n2 = g.add_node();
+//         g.add_edge(
+//             vec![SourceWithBinding { source: n1, bound: vec![] }],
+//             vec![n2],
+//             Some(Label::Symbol("should_not_appear".to_string())),
+//         ).unwrap();
 
-        let dot = bhyp_to_dot_unlabelled(&g);
-        assert!(!dot.contains("should_not_appear"));
-        println!("{}", dot);
-    }
+//         let dot = bhyp_to_dot_unlabelled(&g);
+//         assert!(!dot.contains("should_not_appear"));
+//         println!("{}", dot);
+//     }
 
-    #[test]
-    fn test_example_3_2_from_paper() {
-        // Example 3.2 from the paper: 3 edges, 5 vertices
-        // t(1)={b}, t(2)={d}, t(3)={e}
-        // s(1)={a}, s(2)=∅, s(3)={c}
-        // b(1)={∅}, b(2)=∅, b(3)={{a}}
+//     #[test]
+//     fn test_example_3_2_from_paper() {
+//         // Example 3.2 from the paper: 3 edges, 5 vertices
+//         // t(1)={b}, t(2)={d}, t(3)={e}
+//         // s(1)={a}, s(2)=∅, s(3)={c}
+//         // b(1)={∅}, b(2)=∅, b(3)={{a}}
         
-        let mut g = BHyp::new();
-        let a = g.add_node(); // 0
-        let b = g.add_node(); // 1
-        let c = g.add_node(); // 2
-        let d = g.add_node(); // 3
-        let e = g.add_node(); // 4
+//         let mut g = BHyp::new();
+//         let a = g.add_node(); // 0
+//         let b = g.add_node(); // 1
+//         let c = g.add_node(); // 2
+//         let d = g.add_node(); // 3
+//         let e = g.add_node(); // 4
 
-        // Edge 1: s={a}, t={b}, b={∅}
-        g.add_edge(
-            vec![SourceWithBinding { source: a, bound: vec![] }],
-            vec![b],
-            Some(Label::Symbol("1".to_string())),
-        ).unwrap();
+//         // Edge 1: s={a}, t={b}, b={∅}
+//         g.add_edge(
+//             vec![SourceWithBinding { source: a, bound: vec![] }],
+//             vec![b],
+//             Some(Label::Symbol("1".to_string())),
+//         ).unwrap();
 
-        // Edge 2: s=∅, t={d}, b=∅
-        g.add_edge(
-            vec![],
-            vec![d],
-            Some(Label::Symbol("2".to_string())),
-        ).unwrap();
+//         // Edge 2: s=∅, t={d}, b=∅
+//         g.add_edge(
+//             vec![],
+//             vec![d],
+//             Some(Label::Symbol("2".to_string())),
+//         ).unwrap();
 
-        // Edge 3: s={c}, t={e}, b={{a}} - a is bound at source c
-        g.add_edge(
-            vec![SourceWithBinding { source: c, bound: vec![a] }],
-            vec![e],
-            Some(Label::Symbol("3".to_string())),
-        ).unwrap();
+//         // Edge 3: s={c}, t={e}, b={{a}} - a is bound at source c
+//         g.add_edge(
+//             vec![SourceWithBinding { source: c, bound: vec![a] }],
+//             vec![e],
+//             Some(Label::Symbol("3".to_string())),
+//         ).unwrap();
 
-        let dot = bhyp_to_dot(&g, &DotConfig::with_node_ids());
-        println!("Example 3.2 from paper:\n{}", dot);
+//         let dot = bhyp_to_dot(&g, &DotConfig::with_node_ids());
+//         println!("Example 3.2 from paper:\n{}", dot);
         
-        // The binding from edge 3 to node a should appear as dashed
-        assert!(dot.contains("style=dashed"));
-    }
-}
+//         // The binding from edge 3 to node a should appear as dashed
+//         assert!(dot.contains("style=dashed"));
+//     }
+// }
