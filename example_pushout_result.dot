@@ -6,27 +6,27 @@ digraph G {
   edge [fontname="Helvetica", fontsize=12];
 
   // Nodes
-  n3 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
-  n4 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
   n0 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
-  n2 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
   n1 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+  n3 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+  n2 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+  n4 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
 
   // Hyperedges
-  e2 [label="h", shape=box, style=rounded, color="black"];
-  e3 [label="k", shape=box, style=rounded, color="black"];
-  e1 [label="f", shape=box, style=rounded, color="black"];
+  e3 [label="h", shape=box, style=rounded, color="black"];
+  e2 [label="k", shape=box, style=rounded, color="black"];
   e0 [label="g", shape=box, style=rounded, color="black"];
+  e1 [label="f", shape=box, style=rounded, color="black"];
 
   // Source connections
-  n0 -> e2 [label=""];
-  n3 -> e3 [label=""];
-  n0 -> e1 [label=""];
+  n0 -> e3 [label=""];
+  n3 -> e2 [label=""];
   n2 -> e0 [label=""];
+  n0 -> e1 [label=""];
 
   // Target connections
-  e2 -> n3 [label=""];
-  e3 -> n4 [label=""];
-  e1 -> n2 [label=""];
+  e3 -> n3 [label=""];
+  e2 -> n4 [label=""];
   e0 -> n1 [label=""];
+  e1 -> n2 [label=""];
 }

@@ -37,10 +37,11 @@ pub enum SafetyViolation {
         target_edge: EdgeId,
     },
     /// Condition 4: Leaking - bound vertex is source of edge outside body (i.e bound source is shared)
-    LeakingBoundVertex {
+    /// Condition 4: Leaking - source with binding is shared (source of multiple edges)
+    SharedBoundSource {
         node: NodeId,
         binding_edge: EdgeId,
-        external_edge: EdgeId,
+        other_edges: Vec<EdgeId>,
     },
     /// Condition 5: Leaking - body output is in output interface
     LeakingInOutput {
@@ -287,51 +288,48 @@ fn check_bound_not_target(g: &BHyp, violations: &mut Vec<SafetyViolation>) {
     }
 }
 
-/// Check condition 4: No leaking - bound variables shouldn't be used outside their body
+/// Check condition 4: No leaking - sources with binding cannot be shared
 /// 
-/// For each binding site, check that its bound variables are not sources of edges
-/// outside the body.
+/// For each source that has associated bound vertices, check that it is only
+/// a source of one edge (the binding edge itself). If it's a source of multiple
+/// edges, that means the binding source is shared, which is a leak.
 fn check_no_leaking(g: &BHyp, violations: &mut Vec<SafetyViolation>) {
     for &edge_id in g.edges() {
         if let Some(swbs) = g.get_sources_with_binding(edge_id) {
-            for (source_idx, swb) in swbs.iter().enumerate() {
+            for swb in swbs.iter() {
                 if swb.bound.is_empty() {
                     continue;
                 }
                 
-                let bound_vars: HashSet<NodeId> = swb.bound.iter().cloned().collect();
+                let binding_source = swb.source;
                 
-                // Get body edges for this binding site
-                let body_edges = match g.compute_body_edges(edge_id, source_idx) {
-                    Some(e) => e,
-                    None => continue,
-                };
+                // Find all edges that use this binding source as a source
+                let mut edges_using_source: Vec<EdgeId> = Vec::new();
                 
-                // Also include the binding edge itself as "in scope"
-                let mut in_scope_edges = body_edges.clone();
-                in_scope_edges.insert(edge_id);
-                
-                // Check each bound variable
-                for &bound_var in &bound_vars {
-                    // Find all edges that use this bound variable as a source
-                    for &other_edge_id in g.edges() {
-                        if in_scope_edges.contains(&other_edge_id) {
-                            continue; // Edge is in body, that's fine
-                        }
+                for &other_edge_id in g.edges() {
+                    if let Some(other_swbs) = g.get_sources_with_binding(other_edge_id) {
+                        let uses_as_source = other_swbs.iter()
+                            .any(|other_swb| other_swb.source == binding_source);
                         
-                        if let Some(other_swbs) = g.get_sources_with_binding(other_edge_id) {
-                            let uses_bound_var = other_swbs.iter()
-                                .any(|other_swb| other_swb.source == bound_var);
-                            
-                            if uses_bound_var {
-                                violations.push(SafetyViolation::LeakingBoundVertex {
-                                    node: bound_var,
-                                    binding_edge: edge_id,
-                                    external_edge: other_edge_id,
-                                });
-                            }
+                        if uses_as_source {
+                            edges_using_source.push(other_edge_id);
                         }
                     }
+                }
+                
+                // The binding source should only be used by the binding edge itself
+                // If out-degree > 1, it's shared and that's a violation
+                if edges_using_source.len() > 1 {
+                    let other_edges: Vec<EdgeId> = edges_using_source
+                        .into_iter()
+                        .filter(|&e| e != edge_id)
+                        .collect();
+                    
+                    violations.push(SafetyViolation::SharedBoundSource {
+                        node: binding_source,
+                        binding_edge: edge_id,
+                        other_edges,
+                    });
                 }
             }
         }
@@ -420,8 +418,8 @@ pub fn check_metaedge_safety(g: &BHyp, metaedge_id: EdgeId) -> SafetyResult {
             SafetyViolation::BoundNodeIsTarget { binding_edge, target_edge, .. } => {
                 *binding_edge == metaedge_id || *target_edge == metaedge_id
             }
-            SafetyViolation::LeakingBoundVertex { binding_edge, external_edge, .. } => {
-                *binding_edge == metaedge_id || *external_edge == metaedge_id
+            SafetyViolation::SharedBoundSource { binding_edge, other_edges, .. } => {
+                *binding_edge == metaedge_id || other_edges.contains(&metaedge_id)
             }
             SafetyViolation::LeakingInOutput { edge, .. } => {
                 *edge == metaedge_id
@@ -856,7 +854,7 @@ mod tests {
         
         let violations = result.unwrap_err();
         assert!(violations.iter().any(|v| matches!(v,
-            SafetyViolation::LeakingBoundVertex { .. }
+            SafetyViolation::SharedBoundSource { .. }
         )));
     }
     

@@ -974,8 +974,8 @@ fn format_violation(v: &SafetyViolation) -> String {
         SafetyViolation::BoundNodeIsTarget { node, binding_edge, target_edge } => {
             format!("Node {:?} is bound by {:?} but is target of {:?}", node, binding_edge, target_edge)
         }
-        SafetyViolation::LeakingBoundVertex { node, binding_edge, external_edge } => {
-            format!("Leaking: node {:?} in body of {:?} also source of {:?}", node, binding_edge, external_edge)
+        SafetyViolation::SharedBoundSource { node, binding_edge, other_edges } => {
+            format!("Leaking: node {:?} in body of {:?} also source of {:?}", node, binding_edge, other_edges)
         }
         SafetyViolation::LeakingInOutput { node, edge } => {
             format!("Leaking: body output {:?} of edge {:?} is in output interface", node, edge)
@@ -1075,6 +1075,7 @@ fn run_safety_examples() {
     let g = example_unsafe_leaking_bound_variable();
     println!("{}", g);
     export_safety_example("safety_unsafe_leaking_bound_variable", &g, false);
+    export_bhyp_with_interface("output_leaking_interface", &BHyp_with_interface::from_bhyp(g.clone()));
     
     println!("\n✓ Safety examples complete!");
 }
