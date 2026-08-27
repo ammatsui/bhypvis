@@ -10,7 +10,7 @@ use crate::categorical::{
     PushoutResult, PushoutComplementError, CoproductResult,
     BHypMorphism,
 };
-use crate::bhyp_op::{is_safe};
+use crate::safety::{is_safe};
 
 /// Error types for substitution operations
 #[derive(Debug, Clone)]
@@ -898,8 +898,8 @@ mod tests {
             Some(Label::Symbol("f".to_string())),
         ).unwrap();
         
-        let gi = BHyp_with_interface::from_bhyp(g);
-        assert!(is_safe(&gi));
+        //let gi = BHyp_with_interface::from_bhyp(g);
+        assert!(is_safe(&g));
     }
 
     #[test]
@@ -915,8 +915,8 @@ mod tests {
             Some(Label::Symbol("λ".to_string())),
         ).unwrap();
         
-        let gi = BHyp_with_interface::from_bhyp(g);
-        assert!(is_safe(&gi));
+        //let gi = BHyp_with_interface::from_bhyp(g);
+        assert!(is_safe(&g));
     }
 
     #[test]
@@ -940,8 +940,8 @@ mod tests {
             Some(Label::Symbol("λ".to_string())),
         ).unwrap();
         
-        let gi = BHyp_with_interface::from_bhyp(g);
-        assert!(!is_safe(&gi));
+     //   let gi = BHyp_with_interface::from_bhyp(g);
+        assert!(!is_safe(&g));
     }
 
     #[test]
@@ -964,7 +964,7 @@ mod tests {
             Some(Label::Symbol("f".to_string())),
         ).unwrap();
         
-        let gi = BHyp_with_interface::from_bhyp(g);
-        assert!(!is_safe(&gi));
+        //let gi = BHyp_with_interface::from_bhyp(g);
+        assert!(!is_safe(&g));
     }
 }

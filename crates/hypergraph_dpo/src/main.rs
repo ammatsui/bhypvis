@@ -11,7 +11,7 @@ use hypergraph_dpo::visualisation::{
     morphism_to_dot_labelled, pushout_to_dot_labelled, dpo_to_dot_labelled, 
     DotConfig,
 };
-use hypergraph_dpo::bhyp_op::{check_safety, SafetyViolation};
+use hypergraph_dpo::safety::{check_safety, SafetyViolation};
 
 /// Simple example: function application f(x)
 fn example_simple_function() -> BHyp {
