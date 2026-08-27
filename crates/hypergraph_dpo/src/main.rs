@@ -964,13 +964,15 @@ fn export_safety_example(name: &str, bhyp: &BHyp, expected_safe: bool) {
     let expected = if expected_safe { "expected safe" } else { "expected unsafe" };
     let match_status = if is_safe == expected_safe { "✓" } else { "MISMATCH!" };
     
-    println!("  Safety check: {} ({}) {}", status, expected, match_status);
     
     if let Err(violations) = result {
         for v in violations {
             println!("    - {}", format_violation(&v));
         }
     }
+
+    println!("  Safety check: {} ({}) {}", status, expected, match_status);
+    assert!(is_safe == expected_safe);
 }
 
 /// Format a safety violation for display

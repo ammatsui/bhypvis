@@ -63,16 +63,16 @@ digraph DPO {
     fontname="Helvetica";
     fontsize=12;
 
-    g_n3 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
     g_n1 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
-    g_n0 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
     g_n2 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+    g_n3 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+    g_n0 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
     g_e1 [label="g", shape=box, style=rounded, color="black"];
     g_e0 [label="h", shape=box, style=rounded, color="black"];
     g_n0 -> g_e1 [label=""];
     g_e1 -> g_n3 [label=""];
-    g_n1 -> g_e0 [label=""];
-    g_e0 -> g_n2 [label=""];
+    g_n2 -> g_e0 [label=""];
+    g_e0 -> g_n1 [label=""];
     g_anchor [shape=point, width=0, height=0, style=invis];
   }
   subgraph cluster_D {
@@ -91,16 +91,16 @@ digraph DPO {
     fontname="Helvetica";
     fontsize=12;
 
-    h_n3 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
     h_n1 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
-    h_n0 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
     h_n2 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+    h_n3 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+    h_n0 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
     h_e1 [label="g", shape=box, style=rounded, color="black"];
     h_e0 [label="h", shape=box, style=rounded, color="black"];
     h_n0 -> h_e1 [label=""];
     h_e1 -> h_n3 [label=""];
-    h_n1 -> h_e0 [label=""];
-    h_e0 -> h_n2 [label=""];
+    h_n2 -> h_e0 [label=""];
+    h_e0 -> h_n1 [label=""];
     h_anchor [shape=point, width=0, height=0, style=invis];
   }
   }
