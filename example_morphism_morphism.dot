@@ -1,37 +1,50 @@
 digraph Morphism {
   fontname="Helvetica"
+  fontsize=12
   rankdir=LR;
   compound=true;
+  newrank=true;
 
   subgraph cluster_domain {
-    label="Domain";
+    label="Domain (A)";
     style=filled;
-    fillcolor=lightblue;
-    node [fontname="Helvetica", fontsize=12];
-    d1 [label="d1", shape=circle, style=filled, fillcolor=white, width=0.3, height=0.3, fixedsize=true];
-    d0 [label="d0", shape=circle, style=filled, fillcolor=white, width=0.3, height=0.3, fixedsize=true];
-    de0 [label="f", shape=box, style=rounded];
-    d0 -> de0;
-    de0 -> d1;
+    fillcolor="lightblue";
+    fontname="Helvetica";
+    fontsize=12;
+
+    dom_n1 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+    dom_n0 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+    dom_e0 [label="f", shape=box, style=rounded, color="black"];
+    dom_n0 -> dom_e0 [label=""];
+    dom_e0 -> dom_n1 [label=""];
+    dom_anchor [shape=point, width=0, height=0, style=invis];
   }
 
   subgraph cluster_codomain {
-    label="Codomain";
+    label="Codomain (B)";
     style=filled;
-    fillcolor=lightcoral;
-    node [fontname="Helvetica", fontsize=12];
-    c1 [label="c1", shape=circle, style=filled, fillcolor=white, width=0.3, height=0.3, fixedsize=true];
-    c0 [label="c0", shape=circle, style=filled, fillcolor=white, width=0.3, height=0.3, fixedsize=true];
-    c2 [label="c2", shape=circle, style=filled, fillcolor=white, width=0.3, height=0.3, fixedsize=true];
-    ce0 [label="f", shape=box, style=rounded];
-    ce1 [label="g", shape=box, style=rounded];
-    c0 -> ce0;
-    ce0 -> c1;
-    c1 -> ce1;
-    ce1 -> c2;
+    fillcolor="lightcoral";
+    fontname="Helvetica";
+    fontsize=12;
+
+    cod_n2 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+    cod_n0 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+    cod_n1 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+    cod_e1 [label="g", shape=box, style=rounded, color="black"];
+    cod_e0 [label="f", shape=box, style=rounded, color="black"];
+    cod_n1 -> cod_e1 [label=""];
+    cod_e1 -> cod_n2 [label=""];
+    cod_n0 -> cod_e0 [label=""];
+    cod_e0 -> cod_n1 [label=""];
+    cod_anchor [shape=point, width=0, height=0, style=invis];
   }
 
-  // Function arrows (node mappings)
-  d0 -> c0 [style=dashed, color=green, ltail=cluster_domain, lhead=cluster_codomain];
-  d1 -> c1 [style=dashed, color=green, ltail=cluster_domain, lhead=cluster_codomain];
+  // Morphism: node mappings
+  dom_n1 -> cod_n1 [style=dashed, color=forestgreen, penwidth=1.5, constraint=false];
+  dom_n0 -> cod_n0 [style=dashed, color=forestgreen, penwidth=1.5, constraint=false];
+  // Morphism: edge mappings
+  dom_e0 -> cod_e0 [style=dashed, color=purple, penwidth=1.5, constraint=false];
+
+  // Cluster-level morphism arrow
+  dom_anchor -> cod_anchor [lhead=cluster_codomain, ltail=cluster_domain, style=bold, color=black, label="f", penwidth=2];
 }

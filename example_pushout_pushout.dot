@@ -1,52 +1,104 @@
 digraph PushoutSquare {
   fontname="Helvetica"
-  rankdir=LR;
+  fontsize=12
   compound=true;
-  node [fontname="Helvetica", fontsize=12];
+  newrank=true;
+  splines=ortho;
 
-  subgraph cluster_0 {
-    label="C (pullback)";
+  // Top row
+  subgraph top_row {
+    rank=same;
+  subgraph cluster_C {
+    label="C (span apex)";
     style=filled;
-    fillcolor=lightgreen;
-    node [shape=circle, style=filled, fillcolor=white];
-    n0_0 [label=""];
-  }
+    fillcolor="lightgreen";
+    fontname="Helvetica";
+    fontsize=12;
 
-  subgraph cluster_1 {
+    c_n0 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+    c_anchor [shape=point, width=0, height=0, style=invis];
+  }
+  subgraph cluster_A {
     label="A";
     style=filled;
-    fillcolor=lightblue;
-    node [shape=circle, style=filled, fillcolor=white];
-    n1_0 [label=""];
-    n1_1 [label=""];
-    n1_2 [label=""];
+    fillcolor="lightblue";
+    fontname="Helvetica";
+    fontsize=12;
+
+    a_n1 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+    a_n2 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+    a_n0 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+    a_e0 [label="f", shape=box, style=rounded, color="black"];
+    a_e1 [label="g", shape=box, style=rounded, color="black"];
+    a_n0 -> a_e0 [label=""];
+    a_e0 -> a_n1 [label=""];
+    a_n1 -> a_e1 [label=""];
+    a_e1 -> a_n2 [label=""];
+    a_anchor [shape=point, width=0, height=0, style=invis];
+  }
   }
 
-  subgraph cluster_2 {
+  // Bottom row
+  subgraph bottom_row {
+    rank=same;
+  subgraph cluster_B {
     label="B";
     style=filled;
-    fillcolor=lightyellow;
-    node [shape=circle, style=filled, fillcolor=white];
-    n2_0 [label=""];
-    n2_2 [label=""];
-    n2_1 [label=""];
-  }
+    fillcolor="lightyellow";
+    fontname="Helvetica";
+    fontsize=12;
 
-  subgraph cluster_3 {
+    b_n1 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+    b_n0 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+    b_n2 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+    b_e0 [label="h", shape=box, style=rounded, color="black"];
+    b_e1 [label="k", shape=box, style=rounded, color="black"];
+    b_n0 -> b_e0 [label=""];
+    b_e0 -> b_n1 [label=""];
+    b_n1 -> b_e1 [label=""];
+    b_e1 -> b_n2 [label=""];
+    b_anchor [shape=point, width=0, height=0, style=invis];
+  }
+  subgraph cluster_P {
     label="P (pushout)";
     style=filled;
-    fillcolor=lightcoral;
-    node [shape=circle, style=filled, fillcolor=white];
-    n3_2 [label=""];
-    n3_4 [label=""];
-    n3_0 [label=""];
-    n3_3 [label=""];
-    n3_1 [label=""];
+    fillcolor="lightcoral";
+    fontname="Helvetica";
+    fontsize=12;
+
+    p_n0 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+    p_n2 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+    p_n3 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+    p_n4 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+    p_n1 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+    p_e2 [label="h", shape=box, style=rounded, color="black"];
+    p_e0 [label="f", shape=box, style=rounded, color="black"];
+    p_e3 [label="k", shape=box, style=rounded, color="black"];
+    p_e1 [label="g", shape=box, style=rounded, color="black"];
+    p_n0 -> p_e2 [label=""];
+    p_e2 -> p_n3 [label=""];
+    p_n0 -> p_e0 [label=""];
+    p_e0 -> p_n1 [label=""];
+    p_n3 -> p_e3 [label=""];
+    p_e3 -> p_n4 [label=""];
+    p_n1 -> p_e1 [label=""];
+    p_e1 -> p_n2 [label=""];
+    p_anchor [shape=point, width=0, height=0, style=invis];
+  }
   }
 
-  // Morphisms
-  n0_0 -> n1_0 [label="f: C→A"];
-  n0_0 -> n2_0 [label="g: C→B"];
-  n1_0 -> n3_0 [label="f': A→P"];
-  n2_0 -> n3_0 [label="g': B→P"];
+  // Pushout square morphisms
+  c_anchor -> a_anchor [ltail=cluster_C, lhead=cluster_A, label="f", style=bold, penwidth=2];
+  c_anchor -> b_anchor [ltail=cluster_C, lhead=cluster_B, label="g", style=bold, penwidth=2];
+  a_anchor -> p_anchor [ltail=cluster_A, lhead=cluster_P, label="f'", style=bold, penwidth=2];
+  b_anchor -> p_anchor [ltail=cluster_B, lhead=cluster_P, label="g'", style=bold, penwidth=2];
+
+  // Detailed node mappings (f': A → P)
+  a_n1 -> p_n1 [style=dotted, color=blue, constraint=false];
+  a_n2 -> p_n2 [style=dotted, color=blue, constraint=false];
+  a_n0 -> p_n0 [style=dotted, color=blue, constraint=false];
+  // Detailed node mappings (g': B → P)
+  b_n1 -> p_n3 [style=dotted, color=orange, constraint=false];
+  b_n2 -> p_n4 [style=dotted, color=orange, constraint=false];
+  b_n0 -> p_n0 [style=dotted, color=orange, constraint=false];
 }

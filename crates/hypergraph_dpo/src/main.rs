@@ -1,5 +1,3 @@
-
-
 use std::collections::HashMap;
 use std::env;
 use std::fs::File;
@@ -7,11 +5,13 @@ use std::io::Write;
 
 use hypergraph_dpo::bhyp::{BHyp, BHyp_with_interface, EdgeId, Label, NodeId, Signature, SourceWithBinding};
 use hypergraph_dpo::categorical::{BHypMorphism, pushout, dpo, RewriteRule};
-use hypergraph_dpo::visualization::{
-    bhyp_to_dot_labeled, bhyp_to_dot_unlabeled, bhyp_with_interface_to_dot_labeled,
-    bhyp_with_interface_cospan_to_dot, morphism_to_dot_labeled, pushout_to_dot_labeled,
-    dpo_to_dot_labeled, DotConfig,
+use hypergraph_dpo::visualisation::{
+    bhyp_to_dot_labelled, bhyp_to_dot_unlabelled, bhyp_with_interface_to_dot_labelled,
+    bhyp_with_interface_cospan_to_dot, 
+    morphism_to_dot_labelled, pushout_to_dot_labelled, dpo_to_dot_labelled, 
+    DotConfig,
 };
+use hypergraph_dpo::bhyp_op::{check_safety, SafetyViolation};
 
 /// Simple example: function application f(x)
 fn example_simple_function() -> BHyp {
@@ -397,12 +397,443 @@ fn example_dpo_rewriting() -> (BHyp, BHyp, BHyp, BHyp) {
     (rule.left, result.result, rule.right, host)
 }
 
+// ============================================================================
+// SAFETY EXAMPLES FROM THE PAPER (Definition 3.7)
+// ============================================================================
+
+/// Safe example: Simple lambda term λx.f(x)
+/// This is safe because:
+/// - x is bound by exactly one edge (λ), exactly once
+/// - No shared body between edges
+/// - Bound variable x is not a target
+/// - No leaking issues
+fn example_safe_lambda() -> BHyp {
+    let mut g = BHyp::new();
+    
+    let x = g.add_node();      // bound variable
+    let fx = g.add_node();     // f(x) result
+    let result = g.add_node(); // λx.f(x) result
+    
+    // f(x)
+    g.add_edge(
+        vec![SourceWithBinding { source: x, bound: vec![] }],
+        vec![fx],
+        Some(Label::Symbol("f".to_string())),
+    ).unwrap();
+    
+    // λx.f(x) - binds x
+    g.add_edge(
+        vec![SourceWithBinding { source: fx, bound: vec![x] }],
+        vec![result],
+        Some(Label::Symbol("λ".to_string())),
+    ).unwrap();
+    
+    g
+}
+
+/// Safe example: Nested lambda λx.λy.f(x,y)
+/// Safe because each variable is bound exactly once by exactly one edge
+fn example_safe_nested_lambda() -> BHyp {
+    let mut g = BHyp::new();
+    
+    let x = g.add_node();       // outer bound variable
+    let y = g.add_node();       // inner bound variable  
+    let fxy = g.add_node();     // f(x,y) result
+    let inner = g.add_node();   // λy.f(x,y) result
+    let outer = g.add_node();   // λx.λy.f(x,y) result
+    
+    // f(x, y)
+    g.add_edge(
+        vec![
+            SourceWithBinding { source: x, bound: vec![] },
+            SourceWithBinding { source: y, bound: vec![] },
+        ],
+        vec![fxy],
+        Some(Label::Symbol("f".to_string())),
+    ).unwrap();
+    
+    // λy.f(x,y)
+    g.add_edge(
+        vec![SourceWithBinding { source: fxy, bound: vec![y] }],
+        vec![inner],
+        Some(Label::Symbol("λ".to_string())),
+    ).unwrap();
+    
+    // λx.λy.f(x,y)
+    g.add_edge(
+        vec![SourceWithBinding { source: inner, bound: vec![x] }],
+        vec![outer],
+        Some(Label::Symbol("λ".to_string())),
+    ).unwrap();
+    
+    g
+}
+
+/// Safe example: Application with no binding
+/// f(g(x)) - a simple composition with no binding
+fn example_safe_composition() -> BHyp {
+    let mut g = BHyp::new();
+    
+    let x = g.add_node();   // input
+    let gx = g.add_node();  // g(x)
+    let fgx = g.add_node(); // f(g(x))
+    
+    // g(x)
+    g.add_edge(
+        vec![SourceWithBinding { source: x, bound: vec![] }],
+        vec![gx],
+        Some(Label::Symbol("g".to_string())),
+    ).unwrap();
+    
+    // f(g(x))
+    g.add_edge(
+        vec![SourceWithBinding { source: gx, bound: vec![] }],
+        vec![fgx],
+        Some(Label::Symbol("f".to_string())),
+    ).unwrap();
+    
+    g
+}
+
+/// UNSAFE Example 1: Variable bound by multiple edges
+/// Violates condition 1: "each vertex is bound to at most one edge"
+fn example_unsafe_multiple_binders() -> BHyp {
+    let mut g = BHyp::new();
+    
+    let x = g.add_node();       // variable bound by TWO edges - UNSAFE
+    let body1 = g.add_node();   
+    let body2 = g.add_node();   
+    let result1 = g.add_node(); 
+    let result2 = g.add_node(); 
+    
+    // First edge uses x
+    g.add_edge(
+        vec![SourceWithBinding { source: x, bound: vec![] }],
+        vec![body1],
+        Some(Label::Symbol("f".to_string())),
+    ).unwrap();
+    
+    // Second edge uses x  
+    g.add_edge(
+        vec![SourceWithBinding { source: x, bound: vec![] }],
+        vec![body2],
+        Some(Label::Symbol("g".to_string())),
+    ).unwrap();
+    
+    // First binder - binds x
+    g.add_edge(
+        vec![SourceWithBinding { source: body1, bound: vec![x] }],
+        vec![result1],
+        Some(Label::Symbol("λ".to_string())),
+    ).unwrap();
+    
+    // Second binder - ALSO binds x! UNSAFE!
+    g.add_edge(
+        vec![SourceWithBinding { source: body2, bound: vec![x] }],
+        vec![result2],
+        Some(Label::Symbol("λ".to_string())),
+    ).unwrap();
+    
+    g
+}
+
+/// UNSAFE Example 2: Variable bound multiple times by same edge
+/// Violates condition 1: "at most once"
+fn example_unsafe_bound_twice() -> BHyp {
+    let mut g = BHyp::new();
+    
+    let x = g.add_node();      // bound TWICE by same edge - UNSAFE
+    let body = g.add_node();   
+    let result = g.add_node(); 
+    
+    // Use x
+    g.add_edge(
+        vec![SourceWithBinding { source: x, bound: vec![] }],
+        vec![body],
+        Some(Label::Symbol("f".to_string())),
+    ).unwrap();
+    
+    // Bind x TWICE in the same binding list - UNSAFE!
+    g.add_edge(
+        vec![SourceWithBinding { source: body, bound: vec![x, x] }],
+        vec![result],
+        Some(Label::Symbol("λ".to_string())),
+    ).unwrap();
+    
+    g
+}
+
+/// UNSAFE Example 3: Shared body between edges
+/// Violates condition 2: "no two distinct edges share their body"
+fn example_unsafe_shared_body() -> BHyp {
+    let mut g = BHyp::new();
+    
+    let x = g.add_node();       // shared in body of two different binders
+    let y = g.add_node();       
+    let body_x = g.add_node();  
+    let body_y = g.add_node();  
+    let result1 = g.add_node(); 
+    let result2 = g.add_node(); 
+    
+    // f(x) - x will be in body of edge1
+    g.add_edge(
+        vec![SourceWithBinding { source: x, bound: vec![] }],
+        vec![body_x],
+        Some(Label::Symbol("f".to_string())),
+    ).unwrap();
+    
+    // g(x) - x will ALSO be in body of edge2! UNSAFE!
+    g.add_edge(
+        vec![SourceWithBinding { source: x, bound: vec![] }],
+        vec![body_y],
+        Some(Label::Symbol("g".to_string())),
+    ).unwrap();
+    
+    // λy binds y, but body contains x
+    g.add_edge(
+        vec![SourceWithBinding { source: body_x, bound: vec![y] }],
+        vec![result1],
+        Some(Label::Symbol("λ".to_string())),
+    ).unwrap();
+    
+    // This edge's body would share x with the previous edge's body
+    // Actually, let me reconsider - the body is computed from what's reachable
+    // Let me make a clearer example
+    
+    g
+}
+
+/// UNSAFE Example 3 (clearer): Two binders with overlapping scope
+/// Two λ edges whose bodies share a common subgraph
+fn example_unsafe_shared_body_clear() -> BHyp {
+    let mut g = BHyp::new();
+    
+    let shared = g.add_node();  // This node will be in body of BOTH binders
+    let x = g.add_node();       // bound by first λ
+    let y = g.add_node();       // bound by second λ
+    let fx = g.add_node();      
+    let gy = g.add_node();      
+    let h_shared = g.add_node();
+    let result1 = g.add_node(); 
+    let result2 = g.add_node(); 
+    
+    // f(x)
+    g.add_edge(
+        vec![SourceWithBinding { source: x, bound: vec![] }],
+        vec![fx],
+        Some(Label::Symbol("f".to_string())),
+    ).unwrap();
+    
+    // g(y) 
+    g.add_edge(
+        vec![SourceWithBinding { source: y, bound: vec![] }],
+        vec![gy],
+        Some(Label::Symbol("g".to_string())),
+    ).unwrap();
+    
+    // h(shared) - shared node used by both
+    g.add_edge(
+        vec![SourceWithBinding { source: shared, bound: vec![] }],
+        vec![h_shared],
+        Some(Label::Symbol("h".to_string())),
+    ).unwrap();
+    
+    // First λ: binds x, body includes shared via some connection
+    g.add_edge(
+        vec![
+            SourceWithBinding { source: fx, bound: vec![x] },
+            SourceWithBinding { source: h_shared, bound: vec![] },
+        ],
+        vec![result1],
+        Some(Label::Symbol("λ".to_string())),
+    ).unwrap();
+    
+    // Second λ: binds y, body ALSO includes shared - UNSAFE!
+    g.add_edge(
+        vec![
+            SourceWithBinding { source: gy, bound: vec![y] },
+            SourceWithBinding { source: h_shared, bound: vec![] },
+        ],
+        vec![result2],
+        Some(Label::Symbol("λ".to_string())),
+    ).unwrap();
+    
+    g
+}
+
+/// UNSAFE Example 4: Bound variable is a target
+/// Violates condition 3: "no bound vertex is a target"
+fn example_unsafe_bound_is_target() -> BHyp {
+    let mut g = BHyp::new();
+    
+    let x = g.add_node();      // This will be both bound AND a target - UNSAFE
+    let input = g.add_node();  
+    let result = g.add_node(); 
+    
+    // f produces x as output (x is a TARGET)
+    g.add_edge(
+        vec![SourceWithBinding { source: input, bound: vec![] }],
+        vec![x],  // x is target!
+        Some(Label::Symbol("f".to_string())),
+    ).unwrap();
+    
+    // λ binds x (x is BOUND) - but x is already a target! UNSAFE!
+    g.add_edge(
+        vec![SourceWithBinding { source: x, bound: vec![x] }],
+        vec![result],
+        Some(Label::Symbol("λ".to_string())),
+    ).unwrap();
+    
+    g
+}
+
+/// UNSAFE Example 5: Leaking - body output connected to bound vertex shared elsewhere
+/// Violates condition 4 about leaking
+fn example_unsafe_leaking_shared_source() -> BHyp {
+    let mut g = BHyp::new();
+    
+    let x = g.add_node();      // bound variable
+    let y = g.add_node();      // will be problematic
+    let fx = g.add_node();     
+    let gy = g.add_node();     
+    let result = g.add_node(); 
+    let external = g.add_node();
+    
+    // f(x)
+    g.add_edge(
+        vec![SourceWithBinding { source: x, bound: vec![] }],
+        vec![fx],
+        Some(Label::Symbol("f".to_string())),
+    ).unwrap();
+    
+    // g(y) - y is used as source
+    g.add_edge(
+        vec![SourceWithBinding { source: y, bound: vec![] }],
+        vec![gy],
+        Some(Label::Symbol("g".to_string())),
+    ).unwrap();
+    
+    // λ binds x, with body that includes y as source to fx
+    // and y is connected to bound vertex x somehow
+    g.add_edge(
+        vec![SourceWithBinding { source: fx, bound: vec![x] }],
+        vec![result],
+        Some(Label::Symbol("λ".to_string())),
+    ).unwrap();
+    
+    // External edge also uses x - this creates a leak!
+    g.add_edge(
+        vec![SourceWithBinding { source: x, bound: vec![] }],
+        vec![external],
+        Some(Label::Symbol("leak".to_string())),
+    ).unwrap();
+    
+    g
+}
+
+/// Safe example with metavariable: M[x] where x is properly bound
+fn example_safe_metavariable() -> BHyp {
+    let mut g = BHyp::new();
+    
+    let x = g.add_node();      // bound variable
+    let mx = g.add_node();     // M[x] result  
+    let result = g.add_node(); // λx.M[x] result
+    
+    // Metavariable M applied to x
+    g.add_edge(
+        vec![SourceWithBinding { source: x, bound: vec![] }],
+        vec![mx],
+        Some(Label::Meta("M".to_string(), 1)),
+    ).unwrap();
+    
+    // λx.M[x]
+    g.add_edge(
+        vec![SourceWithBinding { source: mx, bound: vec![x] }],
+        vec![result],
+        Some(Label::Symbol("λ".to_string())),
+    ).unwrap();
+    
+    g
+}
+
+/// Paper Example: Figure from the paper showing a safe hypergraph
+/// This represents the term structure from the paper's examples
+fn example_paper_safe() -> BHyp {
+    let mut g = BHyp::new();
+    
+    // Create a structure similar to paper's Figure 2
+    let v1 = g.add_node();
+    let v2 = g.add_node();
+    let v3 = g.add_node();
+    let v4 = g.add_node();
+    
+    // Edge e1: simple edge
+    g.add_edge(
+        vec![SourceWithBinding { source: v1, bound: vec![] }],
+        vec![v2],
+        Some(Label::Symbol("e₁".to_string())),
+    ).unwrap();
+    
+    // Edge e2: with binding
+    g.add_edge(
+        vec![SourceWithBinding { source: v2, bound: vec![v1] }],
+        vec![v3],
+        Some(Label::Symbol("e₂".to_string())),
+    ).unwrap();
+    
+    // Edge e3: continuation
+    g.add_edge(
+        vec![SourceWithBinding { source: v3, bound: vec![] }],
+        vec![v4],
+        Some(Label::Symbol("e₃".to_string())),
+    ).unwrap();
+    
+    g
+}
+
+/// Paper Example: Unsafe hypergraph from paper
+/// Demonstrates violation of safety conditions
+fn example_paper_unsafe() -> BHyp {
+    let mut g = BHyp::new();
+    
+    let v1 = g.add_node();
+    let v2 = g.add_node();
+    let v3 = g.add_node();
+    let v4 = g.add_node();
+    
+    // Create an unsafe configuration where v1 is bound by two edges
+    g.add_edge(
+        vec![SourceWithBinding { source: v1, bound: vec![] }],
+        vec![v2],
+        Some(Label::Symbol("e₁".to_string())),
+    ).unwrap();
+    
+    g.add_edge(
+        vec![SourceWithBinding { source: v2, bound: vec![v1] }],
+        vec![v3],
+        Some(Label::Symbol("e₂".to_string())),
+    ).unwrap();
+    
+    // Second edge also tries to bind v1 - UNSAFE!
+    g.add_edge(
+        vec![SourceWithBinding { source: v3, bound: vec![v1] }],
+        vec![v4],
+        Some(Label::Symbol("e₃".to_string())),
+    ).unwrap();
+    
+    g
+}
+
+// ============================================================================
+// EXPORT FUNCTIONS
+// ============================================================================
+
 /// Export example to DOT file
-fn export_bhyp(name: &str, bhyp: &BHyp, labeled: bool) {
-    let dot = if labeled {
-        bhyp_to_dot_labeled(bhyp)
+fn export_bhyp(name: &str, bhyp: &BHyp, labelled: bool) {
+    let dot = if labelled {
+        bhyp_to_dot_labelled(bhyp)
     } else {
-        bhyp_to_dot_unlabeled(bhyp)
+        bhyp_to_dot_unlabelled(bhyp)
     };
 
     let filename = format!("{}.dot", name);
@@ -421,7 +852,7 @@ fn export_bhyp(name: &str, bhyp: &BHyp, labeled: bool) {
 /// Export BHyp_with_interface to DOT file (both detailed and cospan views)
 fn export_bhyp_with_interface(name: &str, bhyp_i: &BHyp_with_interface) {
     // Detailed view
-    let dot = bhyp_with_interface_to_dot_labeled(bhyp_i);
+    let dot = bhyp_with_interface_to_dot_labelled(bhyp_i);
     let filename = format!("{}_detailed.dot", name);
     match File::create(&filename) {
         Ok(mut f) => {
@@ -451,7 +882,7 @@ fn export_bhyp_with_interface(name: &str, bhyp_i: &BHyp_with_interface) {
 
 /// Export morphism to DOT file
 fn export_morphism(name: &str, morphism: &BHypMorphism) {
-    let dot = morphism_to_dot_labeled(morphism);
+    let dot = morphism_to_dot_labelled(morphism);
     let filename = format!("{}_morphism.dot", name);
     match File::create(&filename) {
         Ok(mut f) => {
@@ -480,7 +911,7 @@ fn export_pushout_example(name: &str, c: &BHyp, a: &BHyp, b: &BHyp, _pushout_obj
     
     let pushout_result = pushout(c, a, b, &f_nodes, &f_edges, &g_nodes, &g_edges);
     
-    let dot = pushout_to_dot_labeled(c, a, b, &pushout_result);
+    let dot = pushout_to_dot_labelled(c, a, b, &pushout_result);
     let filename = format!("{}_pushout.dot", name);
     match File::create(&filename) {
         Ok(mut f) => {
@@ -506,7 +937,7 @@ fn export_dpo_example(name: &str, lhs: &BHyp, interface: &BHyp, rhs: &BHyp, resu
         complement: BHyp::new(),
     };
     
-    let dot = dpo_to_dot_labeled(lhs, interface, rhs, result, &dpo_result);
+    let dot = dpo_to_dot_labelled(lhs, interface, rhs, result, &dpo_result);
     let filename = format!("{}_dpo.dot", name);
     match File::create(&filename) {
         Ok(mut f) => {
@@ -520,8 +951,54 @@ fn export_dpo_example(name: &str, lhs: &BHyp, interface: &BHyp, rhs: &BHyp, resu
     }
 }
 
+/// Export a safety example with check results
+fn export_safety_example(name: &str, bhyp: &BHyp, expected_safe: bool) {
+    // Export the graph
+    export_bhyp(name, bhyp, true);
+    
+    // Check safety
+    let result = check_safety(bhyp);
+    
+    let is_safe = result.is_ok();
+    let status = if is_safe { "SAFE ✓" } else { "UNSAFE ✗" };
+    let expected = if expected_safe { "expected safe" } else { "expected unsafe" };
+    let match_status = if is_safe == expected_safe { "✓" } else { "MISMATCH!" };
+    
+    println!("  Safety check: {} ({}) {}", status, expected, match_status);
+    
+    if let Err(violations) = result {
+        for v in violations {
+            println!("    - {}", format_violation(&v));
+        }
+    }
+}
+
+/// Format a safety violation for display
+fn format_violation(v: &SafetyViolation) -> String {
+    match v {
+        SafetyViolation::BoundToMultipleEdges { node, edges } => {
+            format!("Node {:?} bound by multiple edges: {:?}", node, edges)
+        }
+        SafetyViolation::BoundMultipleTimes { node, edge, count } => {
+            format!("Node {:?} bound {} times by edge {:?}", node, count, edge)
+        }
+        SafetyViolation::SharedBody { edge1, edge2, shared_nodes } => {
+            format!("Edges {:?} and {:?} share body nodes: {:?}", edge1, edge2, shared_nodes)
+        }
+        SafetyViolation::BoundNodeIsTarget { node, binding_edge, target_edge } => {
+            format!("Node {:?} is bound by {:?} but is target of {:?}", node, binding_edge, target_edge)
+        }
+        SafetyViolation::LeakingSharedSource { node, body_edge, external_edge } => {
+            format!("Leaking: node {:?} in body of {:?} also source of {:?}", node, body_edge, external_edge)
+        }
+        SafetyViolation::LeakingInOutput { node, edge } => {
+            format!("Leaking: body output {:?} of edge {:?} is in output interface", node, edge)
+        }
+    }
+}
+
 fn print_usage(prog: &str) {
-    eprintln!("Usage: {} [all|simple|lambda|curried|metavar|interface|morphism|pushout|dpo]", prog);
+    eprintln!("Usage: {} [all|simple|lambda|curried|metavar|interface|morphism|pushout|dpo|safety]", prog);
     eprintln!();
     eprintln!("Basic examples:");
     eprintln!("  {} simple      - Simple function application f(x)", prog);
@@ -535,7 +1012,77 @@ fn print_usage(prog: &str) {
     eprintln!("  {} pushout     - Pushout square construction", prog);
     eprintln!("  {} dpo         - Double Pushout graph rewriting", prog);
     eprintln!();
+    eprintln!("Safety examples (from paper Definition 3.7):");
+    eprintln!("  {} safety      - All safety examples with checks", prog);
+    eprintln!();
     eprintln!("  {} all         - Run all examples", prog);
+}
+
+fn run_safety_examples() {
+    println!("\n### SAFETY EXAMPLES (Definition 3.7) ###\n");
+    
+    // Safe examples
+    println!("=== SAFE EXAMPLES ===\n");
+    
+    println!("1. Simple lambda λx.f(x):");
+    let g = example_safe_lambda();
+    println!("{}", g);
+    export_safety_example("safety_safe_lambda", &g, true);
+    
+    println!("\n2. Nested lambda λx.λy.f(x,y):");
+    let g = example_safe_nested_lambda();
+    println!("{}", g);
+    export_safety_example("safety_safe_nested", &g, true);
+    
+    println!("\n3. Simple composition f(g(x)):");
+    let g = example_safe_composition();
+    println!("{}", g);
+    export_safety_example("safety_safe_composition", &g, true);
+    
+    println!("\n4. Safe metavariable λx.M[x]:");
+    let g = example_safe_metavariable();
+    println!("{}", g);
+    export_safety_example("safety_safe_metavar", &g, true);
+    
+    println!("\n5. Paper safe example:");
+    let g = example_paper_safe();
+    println!("{}", g);
+    export_safety_example("safety_paper_safe", &g, true);
+    
+    // Unsafe examples
+    println!("\n=== UNSAFE EXAMPLES ===\n");
+    
+    println!("1. UNSAFE: Variable bound by multiple edges (violates condition 1):");
+    let g = example_unsafe_multiple_binders();
+    println!("{}", g);
+    export_safety_example("safety_unsafe_multiple_binders", &g, false);
+    
+    println!("\n2. UNSAFE: Variable bound twice by same edge (violates condition 1):");
+    let g = example_unsafe_bound_twice();
+    println!("{}", g);
+    export_safety_example("safety_unsafe_bound_twice", &g, false);
+    
+    println!("\n3. UNSAFE: Shared body between edges (violates condition 2):");
+    let g = example_unsafe_shared_body_clear();
+    println!("{}", g);
+    export_safety_example("safety_unsafe_shared_body", &g, false);
+    
+    println!("\n4. UNSAFE: Bound variable is target (violates condition 3):");
+    let g = example_unsafe_bound_is_target();
+    println!("{}", g);
+    export_safety_example("safety_unsafe_bound_target", &g, false);
+    
+    println!("\n5. UNSAFE: Leaking shared source (violates condition 4):");
+    let g = example_unsafe_leaking_shared_source();
+    println!("{}", g);
+    export_safety_example("safety_unsafe_leaking", &g, false);
+    
+    println!("\n6. UNSAFE: Paper unsafe example (bound by multiple edges):");
+    let g = example_paper_unsafe();
+    println!("{}", g);
+    export_safety_example("safety_paper_unsafe", &g, false);
+    
+    println!("\n✓ Safety examples complete!");
 }
 
 fn main() {
@@ -634,6 +1181,9 @@ fn main() {
             export_bhyp("example_dpo_host", &host, true);
             export_bhyp("example_dpo_result", &result, true);
         }
+        "safety" => {
+            run_safety_examples();
+        }
         "all" => {
             println!("Running all BHyp and Categorical visualization examples...\n");
 
@@ -714,6 +1264,9 @@ fn main() {
             export_bhyp("example_dpo_rhs", &rhs, true);
             export_bhyp("example_dpo_host", &host, true);
             export_bhyp("example_dpo_result", &result, true);
+
+            // === Safety Examples ===
+            run_safety_examples();
 
             println!("\n✓ All examples exported successfully!");
         }
