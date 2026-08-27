@@ -7,36 +7,36 @@ digraph G {
 
   // Nodes
   n4 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
-  n0 [label="", shape=circle, style=filled, fillcolor=white, color="blue", width=0.2, height=0.2, fixedsize=true];
-  n2 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
   n5 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
-  n6 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
   n3 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+  n0 [label="", shape=circle, style=filled, fillcolor=white, color="blue", width=0.2, height=0.2, fixedsize=true];
   n1 [label="", shape=circle, style=filled, fillcolor=white, color="blue", width=0.2, height=0.2, fixedsize=true];
+  n6 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+  n2 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
 
   // Hyperedges
-  e1 [label="h1", shape=box, style=rounded, color="black"];
+  e2 [label="g", shape=box, style=rounded, color="black"];
   e3 [label="h2", shape=box, style=rounded, color="black"];
-  e5 [label="λ", shape=box, style=rounded, color="black"];
   e4 [label="λ", shape=box, style=rounded, color="black"];
   e0 [label="f", shape=box, style=rounded, color="black"];
-  e2 [label="g", shape=box, style=rounded, color="black"];
+  e5 [label="λ", shape=box, style=rounded, color="black"];
+  e1 [label="h1", shape=box, style=rounded, color="black"];
 
   // Source connections
-  n2 -> e1 [label=""];
+  n1 -> e2 [label=""];
   n2 -> e3 [label=""];
-  n4 -> e5 [label=""];
-  n1 -> e5 [style=dashed, color="blue", constraint=false, label="b0,0"];
   n3 -> e4 [label=""];
   n0 -> e4 [style=dashed, color="blue", constraint=false, label="b0,0"];
   n0 -> e0 [label=""];
-  n1 -> e2 [label=""];
+  n4 -> e5 [label=""];
+  n1 -> e5 [style=dashed, color="blue", constraint=false, label="b0,0"];
+  n2 -> e1 [label=""];
 
   // Target connections
-  e1 -> n3 [label=""];
+  e2 -> n2 [label=""];
   e3 -> n4 [label=""];
-  e5 -> n6 [label=""];
   e4 -> n5 [label=""];
   e0 -> n2 [label=""];
-  e2 -> n2 [label=""];
+  e5 -> n6 [label=""];
+  e1 -> n3 [label=""];
 }

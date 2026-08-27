@@ -6,30 +6,30 @@ digraph G {
   edge [fontname="Helvetica", fontsize=12];
 
   // Nodes
-  n3 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
-  n4 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
-  n2 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
-  n0 [label="", shape=circle, style=filled, fillcolor=white, color="blue", width=0.2, height=0.2, fixedsize=true];
-  n5 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
   n1 [label="", shape=circle, style=filled, fillcolor=white, color="blue", width=0.2, height=0.2, fixedsize=true];
+  n4 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+  n0 [label="", shape=circle, style=filled, fillcolor=white, color="blue", width=0.2, height=0.2, fixedsize=true];
+  n3 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+  n5 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+  n2 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
 
   // Hyperedges
   e0 [label="f", shape=box, style=rounded, color="black"];
   e1 [label="g", shape=box, style=rounded, color="black"];
-  e2 [label="λ", shape=box, style=rounded, color="black"];
   e3 [label="λ", shape=box, style=rounded, color="black"];
+  e2 [label="λ", shape=box, style=rounded, color="black"];
 
   // Source connections
   n0 -> e0 [label=""];
   n1 -> e1 [label=""];
-  n2 -> e2 [label=""];
-  n0 -> e2 [style=dashed, color="blue", constraint=false, label="b0,0"];
   n3 -> e3 [label=""];
   n1 -> e3 [style=dashed, color="blue", constraint=false, label="b0,0"];
+  n2 -> e2 [label=""];
+  n0 -> e2 [style=dashed, color="blue", constraint=false, label="b0,0"];
 
   // Target connections
   e0 -> n2 [label=""];
   e1 -> n3 [label=""];
-  e2 -> n4 [label=""];
   e3 -> n5 [label=""];
+  e2 -> n4 [label=""];
 }

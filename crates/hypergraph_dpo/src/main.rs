@@ -12,7 +12,7 @@ use hypergraph_dpo::visualisation::{
     morphism_to_dot_labelled, pushout_to_dot_labelled, dpo_to_dot_labelled, 
     DotConfig,
 };
-use hypergraph_dpo::safety::{check_safety, check_safety_with_interface, SafetyViolation};
+use hypergraph_dpo::safety::{self, SafetyViolation, check_safety, check_safety_with_interface};
 
 /// Simple example: function application f(x)
 fn example_simple_function() -> BHyp {
@@ -935,6 +935,7 @@ fn export_safety_example(name: &str, bhyp: &BHyp, expected_safe: bool) {
             println!("    - {}", format_violation(&v));
         }
     }
+    
 }
 
 /// Export a safety example with interface
@@ -1076,7 +1077,8 @@ fn run_safety_examples() {
     println!("{}", g);
     export_safety_example("safety_unsafe_leaking_bound_variable", &g, false);
     export_bhyp_with_interface("output_leaking_interface", &BHyp_with_interface::from_bhyp(g.clone()));
-    
+    let bg = safety::construct_body_hypergraph(&g,  EdgeId(1),0);
+    export_bhyp_with_interface("leaking_body", &BHyp_with_interface::from_bhyp(bg.unwrap()));
     println!("\n✓ Safety examples complete!");
 }
 

@@ -25,8 +25,8 @@ digraph PushoutSquare {
     fontname="Helvetica";
     fontsize=12;
 
-    a_n2 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
     a_n1 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+    a_n2 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
     a_n0 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
     a_e1 [label="g", shape=box, style=rounded, color="black"];
     a_e0 [label="f", shape=box, style=rounded, color="black"];
@@ -66,19 +66,19 @@ digraph PushoutSquare {
     fontname="Helvetica";
     fontsize=12;
 
-    p_n2 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
-    p_n0 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
     p_n1 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
     p_n3 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
     p_n4 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+    p_n2 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+    p_n0 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
     p_e0 [label="g", shape=box, style=rounded, color="black"];
     p_e1 [label="f", shape=box, style=rounded, color="black"];
     p_e3 [label="h", shape=box, style=rounded, color="black"];
     p_e2 [label="k", shape=box, style=rounded, color="black"];
-    p_n2 -> p_e0 [label=""];
-    p_e0 -> p_n1 [label=""];
+    p_n1 -> p_e0 [label=""];
+    p_e0 -> p_n2 [label=""];
     p_n0 -> p_e1 [label=""];
-    p_e1 -> p_n2 [label=""];
+    p_e1 -> p_n1 [label=""];
     p_n0 -> p_e3 [label=""];
     p_e3 -> p_n3 [label=""];
     p_n3 -> p_e2 [label=""];
@@ -94,11 +94,11 @@ digraph PushoutSquare {
   b_anchor -> p_anchor [ltail=cluster_B, lhead=cluster_P, label="g'", style=bold, penwidth=2];
 
   // Detailed node mappings (f': A → P)
-  a_n1 -> p_n2 [style=dotted, color=blue, constraint=false];
   a_n0 -> p_n0 [style=dotted, color=blue, constraint=false];
-  a_n2 -> p_n1 [style=dotted, color=blue, constraint=false];
+  a_n1 -> p_n1 [style=dotted, color=blue, constraint=false];
+  a_n2 -> p_n2 [style=dotted, color=blue, constraint=false];
   // Detailed node mappings (g': B → P)
   b_n0 -> p_n0 [style=dotted, color=orange, constraint=false];
-  b_n1 -> p_n3 [style=dotted, color=orange, constraint=false];
   b_n2 -> p_n4 [style=dotted, color=orange, constraint=false];
+  b_n1 -> p_n3 [style=dotted, color=orange, constraint=false];
 }

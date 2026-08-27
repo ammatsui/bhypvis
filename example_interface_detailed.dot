@@ -19,12 +19,12 @@ digraph BHypWithInterface {
     n2 [label="", shape=circle, style=filled, fillcolor=white, color="red", width=0.2, height=0.2, fixedsize=true];
     n0 [label="", shape=circle, style=filled, fillcolor=white, color="green", width=0.2, height=0.2, fixedsize=true];
     n1 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
-    e0 [label="f", shape=box, style=rounded, color="black"];
     e1 [label="g", shape=box, style=rounded, color="black"];
-    n0 -> e0 [label=""];
-    e0 -> n1 [label=""];
+    e0 [label="f", shape=box, style=rounded, color="black"];
     n1 -> e1 [label=""];
     e1 -> n2 [label=""];
+    n0 -> e0 [label=""];
+    e0 -> n1 [label=""];
   }
 
   subgraph cluster_output {

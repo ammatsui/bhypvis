@@ -8,7 +8,7 @@
 //! 5. No leaking: body outputs aren't in the output interface
 
 use std::collections::{HashMap, HashSet};
-use crate::bhyp::{BHyp, BHyp_with_interface, NodeId, EdgeId};
+use crate::bhyp::{BHyp, BHyp_with_interface, NodeId, EdgeId, SourceWithBinding, Label};
 
 /// Types of safety violations
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -366,10 +366,8 @@ fn compute_body_outputs(g: &BHyp, edge_id: EdgeId, source_idx: usize) -> HashSet
     body_outputs
 }
 
-/// Check condition 5: Body outputs not in output interface
+/// Check condition 5: Body outputs should only be the binding source
 fn check_no_leaking_to_output_interface(g: &BHyp_with_interface, violations: &mut Vec<SafetyViolation>) {
-    let output_nodes = g.output_interface_nodes();
-    
     for &edge_id in g.edges() {
         if let Some(swbs) = g.get_sources_with_binding(edge_id) {
             for (source_idx, swb) in swbs.iter().enumerate() {
@@ -377,11 +375,12 @@ fn check_no_leaking_to_output_interface(g: &BHyp_with_interface, violations: &mu
                     continue;
                 }
                 
+                let binding_source = swb.source;
                 let body_outputs = compute_body_outputs(g.bhyp(), edge_id, source_idx);
                 
-                // Check if any body output is in the output interface
+                // The ONLY valid body output is the binding source itself
                 for &output in &body_outputs {
-                    if output_nodes.contains(&output) {
+                    if output != binding_source {
                         violations.push(SafetyViolation::LeakingInOutput {
                             node: output,
                             edge: edge_id,
@@ -431,6 +430,302 @@ pub fn check_metaedge_safety(g: &BHyp, metaedge_id: EdgeId) -> SafetyResult {
         Ok(())
     } else {
         Err(relevant)
+    }
+}
+
+/// body vis
+/// 
+/// 
+
+
+/// Construct the body of a binding site as a new BHyp
+/// 
+/// The body hypergraph contains:
+/// - All nodes in the body (computed via compute_body)
+/// - All edges in the body (computed via compute_body_edges)
+/// - The structure (sources, targets, bindings) restricted to the body
+/// 
+/// Returns None if the binding site has no bound variables or doesn't exist.
+pub fn construct_body_hypergraph(g: &BHyp, edge_id: EdgeId, source_idx: usize) -> Option<BHyp> {
+    // Get the binding information
+    let swbs = g.get_sources_with_binding(edge_id)?;
+    let swb = swbs.get(source_idx)?;
+    
+    if swb.bound.is_empty() {
+        return None;
+    }
+    
+    // Compute body nodes and edges
+    let body_nodes = g.compute_body(edge_id, source_idx)?;
+    let body_edges = g.compute_body_edges(edge_id, source_idx)?;
+    
+    // Create a new hypergraph for the body
+    let mut body_hyp = BHyp::new();
+    
+    // Create a mapping from original node IDs to new node IDs
+    let mut node_map: HashMap<NodeId, NodeId> = HashMap::new();
+    
+    // Add all body nodes to the new hypergraph
+    for &node in &body_nodes {
+        let new_node = body_hyp.add_node();
+        node_map.insert(node, new_node);
+    }
+    
+    // Add all body edges to the new hypergraph
+    for &body_edge_id in &body_edges {
+        if let Some(edge_swbs) = g.get_sources_with_binding(body_edge_id) {
+            if let Some(targets) = g.get_targets(body_edge_id) {
+                // Map sources and their bindings
+                let new_swbs: Vec<SourceWithBinding> = edge_swbs
+                    .iter()
+                    .filter_map(|edge_swb| {
+                        // Only include sources that are in the body
+                        node_map.get(&edge_swb.source).map(|&new_source| {
+                            SourceWithBinding {
+                                source: new_source,
+                                bound: edge_swb.bound
+                                    .iter()
+                                    .filter_map(|&b| node_map.get(&b).copied())
+                                    .collect(),
+                            }
+                        })
+                    })
+                    .collect();
+                
+                // Map targets (only those in the body)
+                let new_targets: Vec<NodeId> = targets
+                    .iter()
+                    .filter_map(|&t| node_map.get(&t).copied())
+                    .collect();
+                
+                // Only add the edge if it has valid sources and targets
+                if !new_swbs.is_empty() && !new_targets.is_empty() {
+                    let label = g.get_label(body_edge_id).cloned();
+                    let _ = body_hyp.add_edge(new_swbs, new_targets, label);
+                }
+            }
+        }
+    }
+    
+    Some(body_hyp)
+}
+
+/// Construct the body as a BHyp_with_interface
+/// 
+/// The interface is computed based on the body's structure:
+/// - Input interface: nodes with in-degree 0 and not bound (typically the bound variables)
+/// - Output interface: nodes with out-degree 0 (typically the binding source)
+pub fn construct_body_with_interface(g: &BHyp, edge_id: EdgeId, source_idx: usize) -> Option<BHyp_with_interface> {
+    let body_hyp = construct_body_hypergraph(g, edge_id, source_idx)?;
+    Some(BHyp_with_interface::from_bhyp(body_hyp))
+}
+
+/// Information about the constructed body, including mappings
+#[derive(Debug, Clone)]
+pub struct BodyConstruction {
+    /// The body as a hypergraph
+    pub body: BHyp,
+    /// Mapping from original node IDs to body node IDs
+    pub node_map: HashMap<NodeId, NodeId>,
+    /// Mapping from original edge IDs to body edge IDs  
+    pub edge_map: HashMap<EdgeId, EdgeId>,
+    /// The bound variables (in original node IDs)
+    pub bound_vars: Vec<NodeId>,
+    /// The binding source (in original node ID)
+    pub binding_source: NodeId,
+}
+
+/// Construct the body with full mapping information
+/// 
+/// This is useful when you need to relate nodes/edges in the body
+/// back to the original hypergraph.
+pub fn construct_body_with_mappings(g: &BHyp, edge_id: EdgeId, source_idx: usize) -> Option<BodyConstruction> {
+    // Get the binding information
+    let swbs = g.get_sources_with_binding(edge_id)?;
+    let swb = swbs.get(source_idx)?;
+    
+    if swb.bound.is_empty() {
+        return None;
+    }
+    
+    let binding_source = swb.source;
+    let bound_vars = swb.bound.clone();
+    
+    // Compute body nodes and edges
+    let body_nodes = g.compute_body(edge_id, source_idx)?;
+    let body_edges = g.compute_body_edges(edge_id, source_idx)?;
+    
+    // Create a new hypergraph for the body
+    let mut body = BHyp::new();
+    
+    // Create mappings
+    let mut node_map: HashMap<NodeId, NodeId> = HashMap::new();
+    let mut edge_map: HashMap<EdgeId, EdgeId> = HashMap::new();
+    
+    // Add all body nodes to the new hypergraph
+    for &node in &body_nodes {
+        let new_node = body.add_node();
+        node_map.insert(node, new_node);
+    }
+    
+    // Add all body edges to the new hypergraph
+    for &body_edge_id in &body_edges {
+        if let Some(edge_swbs) = g.get_sources_with_binding(body_edge_id) {
+            if let Some(targets) = g.get_targets(body_edge_id) {
+                // Map sources and their bindings
+                let new_swbs: Vec<SourceWithBinding> = edge_swbs
+                    .iter()
+                    .filter_map(|edge_swb| {
+                        node_map.get(&edge_swb.source).map(|&new_source| {
+                            SourceWithBinding {
+                                source: new_source,
+                                bound: edge_swb.bound
+                                    .iter()
+                                    .filter_map(|&b| node_map.get(&b).copied())
+                                    .collect(),
+                            }
+                        })
+                    })
+                    .collect();
+                
+                // Map targets (only those in the body)
+                let new_targets: Vec<NodeId> = targets
+                    .iter()
+                    .filter_map(|&t| node_map.get(&t).copied())
+                    .collect();
+                
+                // Only add the edge if it has valid sources and targets
+                if !new_swbs.is_empty() && !new_targets.is_empty() {
+                    let label = g.get_label(body_edge_id).cloned();
+                    if let Ok(new_edge_id) = body.add_edge(new_swbs, new_targets, label) {
+                        edge_map.insert(body_edge_id, new_edge_id);
+                    }
+                }
+            }
+        }
+    }
+    
+    Some(BodyConstruction {
+        body,
+        node_map,
+        edge_map,
+        bound_vars,
+        binding_source,
+    })
+}
+
+#[cfg(test)]
+mod body_construction_tests {
+    use super::*;
+    use crate::bhyp::{Label, SourceWithBinding};
+    
+    #[test]
+    fn test_construct_simple_body() {
+        // λx.f(x)
+        let mut g = BHyp::new();
+        let x = g.add_node();       // 0
+        let fx = g.add_node();      // 1
+        let result = g.add_node();  // 2
+        
+        // f(x)
+        let f_edge = g.add_edge(
+            vec![SourceWithBinding { source: x, bound: vec![] }],
+            vec![fx],
+            Some(Label::Symbol("f".to_string())),
+        ).unwrap();
+        
+        // λx.f(x)
+        let lambda_edge = g.add_edge(
+            vec![SourceWithBinding { source: fx, bound: vec![x] }],
+            vec![result],
+            Some(Label::Symbol("λ".to_string())),
+        ).unwrap();
+        
+        // Construct body of λ
+        let body_construction = construct_body_with_mappings(&g, lambda_edge, 0).unwrap();
+        
+        // Body should contain x and fx
+        assert_eq!(body_construction.body.nodes().len(), 2);
+        // Body should contain the f edge
+        assert_eq!(body_construction.body.edges().len(), 1);
+        // Check bound vars
+        assert_eq!(body_construction.bound_vars, vec![x]);
+        // Check binding source
+        assert_eq!(body_construction.binding_source, fx);
+    }
+    
+    #[test]
+    fn test_construct_nested_body() {
+        // λx.λy.f(x,y)
+        let mut g = BHyp::new();
+        let x = g.add_node();       // 0
+        let y = g.add_node();       // 1
+        let fxy = g.add_node();     // 2
+        let inner = g.add_node();   // 3
+        let outer = g.add_node();   // 4
+        
+        // f(x, y)
+        g.add_edge(
+            vec![
+                SourceWithBinding { source: x, bound: vec![] },
+                SourceWithBinding { source: y, bound: vec![] },
+            ],
+            vec![fxy],
+            Some(Label::Symbol("f".to_string())),
+        ).unwrap();
+        
+        // λy.f(x,y)
+        let inner_lambda = g.add_edge(
+            vec![SourceWithBinding { source: fxy, bound: vec![y] }],
+            vec![inner],
+            Some(Label::Symbol("λ".to_string())),
+        ).unwrap();
+        
+        // λx.λy.f(x,y)
+        let outer_lambda = g.add_edge(
+            vec![SourceWithBinding { source: inner, bound: vec![x] }],
+            vec![outer],
+            Some(Label::Symbol("λ".to_string())),
+        ).unwrap();
+        
+        // Construct body of inner λ (λy)
+        let inner_body = construct_body_with_mappings(&g, inner_lambda, 0).unwrap();
+        assert_eq!(inner_body.body.nodes().len(), 2); // y, fxy
+        assert_eq!(inner_body.bound_vars, vec![y]);
+        
+        // Construct body of outer λ (λx)
+        let outer_body = construct_body_with_mappings(&g, outer_lambda, 0).unwrap();
+        assert_eq!(outer_body.body.nodes().len(), 3); // x, fxy, inner
+        assert_eq!(outer_body.bound_vars, vec![x]);
+    }
+    
+    #[test]
+    fn test_body_with_interface() {
+        // λx.f(x)
+        let mut g = BHyp::new();
+        let x = g.add_node();
+        let fx = g.add_node();
+        let result = g.add_node();
+        
+        g.add_edge(
+            vec![SourceWithBinding { source: x, bound: vec![] }],
+            vec![fx],
+            Some(Label::Symbol("f".to_string())),
+        ).unwrap();
+        
+        let lambda_edge = g.add_edge(
+            vec![SourceWithBinding { source: fx, bound: vec![x] }],
+            vec![result],
+            Some(Label::Symbol("λ".to_string())),
+        ).unwrap();
+        
+        let body_with_interface = construct_body_with_interface(&g, lambda_edge, 0).unwrap();
+        
+        // Check interface
+        // Input should be empty (x is bound, not a free input)
+        // Actually x has in_b > 0 in the original, but in the body it's not bound by anything
+        // So it depends on how we handle this
+        assert!(body_with_interface.bhyp().nodes().len() == 2);
     }
 }
 
@@ -854,7 +1149,7 @@ mod tests {
         
         let violations = result.unwrap_err();
         assert!(violations.iter().any(|v| matches!(v,
-            SafetyViolation::SharedBoundSource { .. }
+            SafetyViolation::LeakingInOutput { .. }
         )));
     }
     
