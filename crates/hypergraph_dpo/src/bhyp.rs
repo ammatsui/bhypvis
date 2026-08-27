@@ -720,7 +720,7 @@ impl fmt::Display for BHyp_with_interface {
 
 
 // ============================================================================
-// Copying and Gluing (Section 3.3.1)
+// Copying and Glueing (Section 3.3.1)
 // ============================================================================
 
 /// Check if a subgraph satisfies conditions for safe copying (Definition 3.11)

@@ -68,6 +68,10 @@ pub fn check_safety(g: &BHyp) -> SafetyResult {
     
     // Check condition 4: no leaking (bound variables used outside body)
     check_no_leaking(g, &mut violations);
+
+    // Check condition 5: body outputs not in output interface
+    let gi = BHyp_with_interface::from_bhyp(g.clone());
+    check_no_leaking_to_output_interface(&gi, &mut violations);
     
     if violations.is_empty() {
         Ok(())
@@ -81,7 +85,6 @@ pub fn is_safe(g: &BHyp) -> bool {
 }
 
 /// Check all safety conditions for a hypergraph with interface
-/// Also checks condition 5 (body outputs not in output interface)
 pub fn check_safety_with_interface(g: &BHyp_with_interface) -> SafetyResult {
     let mut violations = Vec::new();
     
