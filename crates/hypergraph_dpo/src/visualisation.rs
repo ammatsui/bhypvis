@@ -969,13 +969,13 @@ pub fn pushout_complement_to_dot(
         dot.push_str(&morphism_mappings_to_dot(l, "k", "l", "blue", "purple", config));
 
         writeln!(dot, "  // Detailed mappings (k: K -> C)").unwrap();
-        dot.push_str(&morphism_mappings_to_dot(&result.morphism_from_a, "k", "c", "green", "purple", config));
+        dot.push_str(&morphism_mappings_to_dot(&result.morphism_from_k, "k", "c", "green", "purple", config));
 
         writeln!(dot, "  // Detailed mappings (m: L -> G)").unwrap();
         dot.push_str(&morphism_mappings_to_dot(m, "l", "g", "orange", "purple", config));
 
         writeln!(dot, "  // Detailed mappings (c: C -> G)").unwrap();
-        dot.push_str(&morphism_mappings_to_dot(&result.morphism_to_b, "c", "g", "brown", "purple", config));
+        dot.push_str(&morphism_mappings_to_dot(&result.morphism_to_g, "c", "g", "brown", "purple", config));
     }
 
     // Pushout symbol

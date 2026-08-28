@@ -15,9 +15,9 @@ digraph BHypWithInterface {
   subgraph cluster_main {
     label="G";
     style=solid;
+    n1 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
     n2 [label="", shape=circle, style=filled, fillcolor=white, color="red", width=0.2, height=0.2, fixedsize=true];
     n0 [label="", shape=circle, style=filled, fillcolor=white, color="blue", width=0.2, height=0.2, fixedsize=true];
-    n1 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
     e0 [label="f", shape=box, style=rounded, color="black"];
     e1 [label="λ", shape=box, style=rounded, color="black"];
     n0 -> e0 [label=""];

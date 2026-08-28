@@ -6,23 +6,23 @@ digraph G {
   edge [fontname="Helvetica", fontsize=12];
 
   // Nodes
-  n0 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
   n2 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
-  n3 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
   n1 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+  n0 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+  n3 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
 
   // Hyperedges
+  e1 [label="M:1", shape=ellipse, style=rounded, color="orange"];
   e2 [label="g", shape=box, style=rounded, color="black"];
   e0 [label="f", shape=box, style=rounded, color="black"];
-  e1 [label="M:1", shape=ellipse, style=rounded, color="orange"];
 
   // Source connections
+  n1 -> e1 [label=""];
   n2 -> e2 [label=""];
   n0 -> e0 [label=""];
-  n1 -> e1 [label=""];
 
   // Target connections
+  e1 -> n2 [label=""];
   e2 -> n3 [label=""];
   e0 -> n1 [label=""];
-  e1 -> n2 [label=""];
 }
