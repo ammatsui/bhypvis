@@ -5,11 +5,13 @@ use std::fs::File;
 use std::io::Write;
 
 use hypergraph_dpo::bhyp::{BHyp, BHyp_with_interface, EdgeId, Label, NodeId, Signature, SourceWithBinding};
-use hypergraph_dpo::categorical::{BHypMorphism, pushout, dpo, RewriteRule};
+use hypergraph_dpo::categorical::{BHypMorphism, PushoutResult, PushoutComplementResult,
+    PullbackResult};
 use hypergraph_dpo::visualisation::{
     bhyp_to_dot_labelled, bhyp_to_dot_unlabelled, bhyp_with_interface_to_dot_labelled,
     bhyp_with_interface_cospan_to_dot, 
-    morphism_to_dot_labelled, pushout_to_dot_labelled, dpo_to_dot_labelled, 
+    morphism_to_dot_labelled, 
+    //pushout_to_dot_labelled, dpo_to_dot_labelled, 
     DotConfig,
 };
 use hypergraph_dpo::safety::{self, SafetyViolation, check_safety, check_safety_with_interface};
@@ -245,158 +247,156 @@ fn example_morphism() -> (BHyp, BHyp) {
     (domain, codomain)
 }
 
-/// Categorical example: Simple pushout square
-/// Shows how two graphs with common vertex combine into a pushout
-fn example_pushout() -> (BHyp, BHyp, BHyp, BHyp) {
-    // Common vertex C
-    let mut c = BHyp::new();
-    let c_v = c.add_node();
+// /// Categorical example: Simple pushout square
+// /// Shows how two graphs with common vertex combine into a pushout
+// fn example_pushout() -> (BHyp, BHyp, BHyp, BHyp) {
+//     // Common vertex C
+//     let mut c = BHyp::new();
+//     let c_v = c.add_node();
 
-    // First graph A: c_v -> a1 -> a2
-    let mut a = BHyp::new();
-    let a_v = a.add_node(); // image of c_v
-    let a_1 = a.add_node();
-    let a_2 = a.add_node();
-    a.add_edge(
-        vec![SourceWithBinding {
-            source: a_v,
-            bound: vec![],
-        }],
-        vec![a_1],
-        Some(Label::Symbol("f".to_string())),
-    )
-    .unwrap();
-    a.add_edge(
-        vec![SourceWithBinding {
-            source: a_1,
-            bound: vec![],
-        }],
-        vec![a_2],
-        Some(Label::Symbol("g".to_string())),
-    )
-    .unwrap();
+//     // First graph A: c_v -> a1 -> a2
+//     let mut a = BHyp::new();
+//     let a_v = a.add_node(); // image of c_v
+//     let a_1 = a.add_node();
+//     let a_2 = a.add_node();
+//     a.add_edge(
+//         vec![SourceWithBinding {
+//             source: a_v,
+//             bound: vec![],
+//         }],
+//         vec![a_1],
+//         Some(Label::Symbol("f".to_string())),
+//     )
+//     .unwrap();
+//     a.add_edge(
+//         vec![SourceWithBinding {
+//             source: a_1,
+//             bound: vec![],
+//         }],
+//         vec![a_2],
+//         Some(Label::Symbol("g".to_string())),
+//     )
+//     .unwrap();
 
-    // Second graph B: c_v -> b1 -> b2
-    let mut b = BHyp::new();
-    let b_v = b.add_node(); // image of c_v
-    let b_1 = b.add_node();
-    let b_2 = b.add_node();
-    b.add_edge(
-        vec![SourceWithBinding {
-            source: b_v,
-            bound: vec![],
-        }],
-        vec![b_1],
-        Some(Label::Symbol("h".to_string())),
-    )
-    .unwrap();
-    b.add_edge(
-        vec![SourceWithBinding {
-            source: b_1,
-            bound: vec![],
-        }],
-        vec![b_2],
-        Some(Label::Symbol("k".to_string())),
-    )
-    .unwrap();
+//     // Second graph B: c_v -> b1 -> b2
+//     let mut b = BHyp::new();
+//     let b_v = b.add_node(); // image of c_v
+//     let b_1 = b.add_node();
+//     let b_2 = b.add_node();
+//     b.add_edge(
+//         vec![SourceWithBinding {
+//             source: b_v,
+//             bound: vec![],
+//         }],
+//         vec![b_1],
+//         Some(Label::Symbol("h".to_string())),
+//     )
+//     .unwrap();
+//     b.add_edge(
+//         vec![SourceWithBinding {
+//             source: b_1,
+//             bound: vec![],
+//         }],
+//         vec![b_2],
+//         Some(Label::Symbol("k".to_string())),
+//     )
+//     .unwrap();
 
-    // Morphisms: C -> A and C -> B (both map c_v to the common vertex)
-    let mut f_nodes: HashMap<NodeId, NodeId> = HashMap::new();
-    f_nodes.insert(c_v, a_v);
-    let f_edges: HashMap<EdgeId, EdgeId> = HashMap::new();
+//     // Morphisms: C -> A and C -> B (both map c_v to the common vertex)
+//     let mut f_nodes: HashMap<NodeId, NodeId> = HashMap::new();
+//     f_nodes.insert(c_v, a_v);
+//     let f_edges: HashMap<EdgeId, EdgeId> = HashMap::new();
 
-    let mut g_nodes: HashMap<NodeId, NodeId> = HashMap::new();
-    g_nodes.insert(c_v, b_v);
-    let g_edges: HashMap<EdgeId, EdgeId> = HashMap::new();
+//     let mut g_nodes: HashMap<NodeId, NodeId> = HashMap::new();
+//     g_nodes.insert(c_v, b_v);
+//     let g_edges: HashMap<EdgeId, EdgeId> = HashMap::new();
 
-    // Compute pushout
-    let pushout_result = pushout(&c, &a, &b, &f_nodes, &f_edges, &g_nodes, &g_edges);
+//     // Compute pushout
+//     let pushout_result =
+// }
 
-    (c, pushout_result.pushout.clone(), a, b)
-}
+// /// Categorical example: DPO rewriting
+// /// Shows graph rewriting with a left-hand side rule, interface, and right-hand side
+// fn example_dpo_rewriting() -> (BHyp, BHyp, BHyp, BHyp) {
+//     // Left-hand side (rule LHS): pattern to match
+//     let mut lhs = BHyp::new();
+//     let l_x = lhs.add_node();
+//     let l_fx = lhs.add_node();
+//     lhs.add_edge(
+//         vec![SourceWithBinding {
+//             source: l_x,
+//             bound: vec![],
+//         }],
+//         vec![l_fx],
+//         Some(Label::Symbol("f".to_string())),
+//     )
+//     .unwrap();
 
-/// Categorical example: DPO rewriting
-/// Shows graph rewriting with a left-hand side rule, interface, and right-hand side
-fn example_dpo_rewriting() -> (BHyp, BHyp, BHyp, BHyp) {
-    // Left-hand side (rule LHS): pattern to match
-    let mut lhs = BHyp::new();
-    let l_x = lhs.add_node();
-    let l_fx = lhs.add_node();
-    lhs.add_edge(
-        vec![SourceWithBinding {
-            source: l_x,
-            bound: vec![],
-        }],
-        vec![l_fx],
-        Some(Label::Symbol("f".to_string())),
-    )
-    .unwrap();
+//     // Interface (preserved part)
+//     let mut interface = BHyp::new();
+//     let k_x = interface.add_node(); // x is preserved
 
-    // Interface (preserved part)
-    let mut interface = BHyp::new();
-    let k_x = interface.add_node(); // x is preserved
+//     // Right-hand side (replacement)
+//     let mut rhs = BHyp::new();
+//     let r_x = rhs.add_node(); // x is preserved
+//     let r_gx = rhs.add_node(); // new node in result
+//     rhs.add_edge(
+//         vec![SourceWithBinding {
+//             source: r_x,
+//             bound: vec![],
+//         }],
+//         vec![r_gx],
+//         Some(Label::Symbol("g".to_string())),
+//     )
+//     .unwrap();
 
-    // Right-hand side (replacement)
-    let mut rhs = BHyp::new();
-    let r_x = rhs.add_node(); // x is preserved
-    let r_gx = rhs.add_node(); // new node in result
-    rhs.add_edge(
-        vec![SourceWithBinding {
-            source: r_x,
-            bound: vec![],
-        }],
-        vec![r_gx],
-        Some(Label::Symbol("g".to_string())),
-    )
-    .unwrap();
+//     // Host graph: graph to rewrite
+//     let mut host = BHyp::new();
+//     let h_a = host.add_node();
+//     let h_fa = host.add_node();
+//     let h_b = host.add_node();
+//     host.add_edge(
+//         vec![SourceWithBinding {
+//             source: h_a,
+//             bound: vec![],
+//         }],
+//         vec![h_fa],
+//         Some(Label::Symbol("f".to_string())),
+//     )
+//     .unwrap();
+//     host.add_edge(
+//         vec![SourceWithBinding {
+//             source: h_fa,
+//             bound: vec![],
+//         }],
+//         vec![h_b],
+//         Some(Label::Symbol("h".to_string())),
+//     )
+//     .unwrap();
 
-    // Host graph: graph to rewrite
-    let mut host = BHyp::new();
-    let h_a = host.add_node();
-    let h_fa = host.add_node();
-    let h_b = host.add_node();
-    host.add_edge(
-        vec![SourceWithBinding {
-            source: h_a,
-            bound: vec![],
-        }],
-        vec![h_fa],
-        Some(Label::Symbol("f".to_string())),
-    )
-    .unwrap();
-    host.add_edge(
-        vec![SourceWithBinding {
-            source: h_fa,
-            bound: vec![],
-        }],
-        vec![h_b],
-        Some(Label::Symbol("h".to_string())),
-    )
-    .unwrap();
+//     // Define morphisms for the rule
+//     let mut l_nodes: HashMap<NodeId, NodeId> = HashMap::new();
+//     l_nodes.insert(k_x, l_x);
+//     let l_edges: HashMap<EdgeId, EdgeId> = HashMap::new();
 
-    // Define morphisms for the rule
-    let mut l_nodes: HashMap<NodeId, NodeId> = HashMap::new();
-    l_nodes.insert(k_x, l_x);
-    let l_edges: HashMap<EdgeId, EdgeId> = HashMap::new();
+//     let mut r_nodes: HashMap<NodeId, NodeId> = HashMap::new();
+//     r_nodes.insert(k_x, r_x);
+//     let r_edges: HashMap<EdgeId, EdgeId> = HashMap::new();
 
-    let mut r_nodes: HashMap<NodeId, NodeId> = HashMap::new();
-    r_nodes.insert(k_x, r_x);
-    let r_edges: HashMap<EdgeId, EdgeId> = HashMap::new();
+//     let rule = RewriteRule::new(lhs, interface, rhs, l_nodes, l_edges, r_nodes, r_edges);
 
-    let rule = RewriteRule::new(lhs, interface, rhs, l_nodes, l_edges, r_nodes, r_edges);
+//     // Define the match (find where to apply the rule in the host)
+//     let mut match_nodes: HashMap<NodeId, NodeId> = HashMap::new();
+//     match_nodes.insert(NodeId(0), h_a); // Match l_x to h_a
+//     let mut match_edges: HashMap<EdgeId, EdgeId> = HashMap::new();
+//     match_edges.insert(EdgeId(0), EdgeId(0)); // Match the f edge
 
-    // Define the match (find where to apply the rule in the host)
-    let mut match_nodes: HashMap<NodeId, NodeId> = HashMap::new();
-    match_nodes.insert(NodeId(0), h_a); // Match l_x to h_a
-    let mut match_edges: HashMap<EdgeId, EdgeId> = HashMap::new();
-    match_edges.insert(EdgeId(0), EdgeId(0)); // Match the f edge
+//     // Apply DPO rewriting
+//     let result = dpo(&rule, &host, &match_nodes, &match_edges)
+//         .expect("DPO rewriting failed");
 
-    // Apply DPO rewriting
-    let result = dpo(&rule, &host, &match_nodes, &match_edges)
-        .expect("DPO rewriting failed");
-
-    (rule.left, result.result, rule.right, host)
-}
+//     (rule.left, result.result, rule.right, host)
+// }
 
 // ============================================================================
 // SAFETY EXAMPLES (corresponding to test cases)
@@ -860,60 +860,60 @@ fn export_morphism(name: &str, morphism: &BHypMorphism) {
     }
 }
 
-/// Export pushout example to DOT file
-fn export_pushout_example(name: &str, c: &BHyp, a: &BHyp, b: &BHyp, _pushout_obj: &BHyp) {
-    use hypergraph_dpo::categorical::pushout;
+// /// Export pushout example to DOT file
+// fn export_pushout_example(name: &str, c: &BHyp, a: &BHyp, b: &BHyp, _pushout_obj: &BHyp) {
+//     use hypergraph_dpo::categorical::pushout;
     
-    // Recompute to get the morphism mappings for visualization
-    let mut f_nodes: HashMap<NodeId, NodeId> = HashMap::new();
-    f_nodes.insert(NodeId(0), NodeId(0));
-    let f_edges: HashMap<EdgeId, EdgeId> = HashMap::new();
+//     // Recompute to get the morphism mappings for visualization
+//     let mut f_nodes: HashMap<NodeId, NodeId> = HashMap::new();
+//     f_nodes.insert(NodeId(0), NodeId(0));
+//     let f_edges: HashMap<EdgeId, EdgeId> = HashMap::new();
     
-    let mut g_nodes: HashMap<NodeId, NodeId> = HashMap::new();
-    g_nodes.insert(NodeId(0), NodeId(0));
-    let g_edges: HashMap<EdgeId, EdgeId> = HashMap::new();
+//     let mut g_nodes: HashMap<NodeId, NodeId> = HashMap::new();
+//     g_nodes.insert(NodeId(0), NodeId(0));
+//     let g_edges: HashMap<EdgeId, EdgeId> = HashMap::new();
     
-    let pushout_result = pushout(c, a, b, &f_nodes, &f_edges, &g_nodes, &g_edges);
+//     let pushout_result = pushout(c, a, b, &f_nodes, &f_edges, &g_nodes, &g_edges);
     
-    let dot = pushout_to_dot_labelled(c, a, b, &pushout_result);
-    let filename = format!("{}_pushout.dot", name);
-    match File::create(&filename) {
-        Ok(mut f) => {
-            if let Err(e) = f.write_all(dot.as_bytes()) {
-                eprintln!("Failed to write {}: {}", filename, e);
-            } else {
-                println!("✓ Exported {} pushout diagram to {}", name, filename);
-            }
-        }
-        Err(e) => eprintln!("Failed to create {}: {}", filename, e),
-    }
-}
+//     let dot = pushout_to_dot_labelled(c, a, b, &pushout_result);
+//     let filename = format!("{}_pushout.dot", name);
+//     match File::create(&filename) {
+//         Ok(mut f) => {
+//             if let Err(e) = f.write_all(dot.as_bytes()) {
+//                 eprintln!("Failed to write {}: {}", filename, e);
+//             } else {
+//                 println!("✓ Exported {} pushout diagram to {}", name, filename);
+//             }
+//         }
+//         Err(e) => eprintln!("Failed to create {}: {}", filename, e),
+//     }
+// }
 
-/// Export DPO example to DOT file
-fn export_dpo_example(name: &str, lhs: &BHyp, interface: &BHyp, rhs: &BHyp, result: &BHyp) {
-    use hypergraph_dpo::categorical::DPOResult;
+// /// Export DPO example to DOT file
+// fn export_dpo_example(name: &str, lhs: &BHyp, interface: &BHyp, rhs: &BHyp, result: &BHyp) {
+//     use hypergraph_dpo::categorical::DPOResult;
     
-    // Create a minimal DPOResult for visualization
-    let dpo_result = DPOResult {
-        result: result.clone(),
-        right_to_result_nodes: HashMap::new(),
-        right_to_result_edges: HashMap::new(),
-        complement: BHyp::new(),
-    };
+//     // Create a minimal DPOResult for visualization
+//     let dpo_result = DPOResult {
+//         result: result.clone(),
+//         right_to_result_nodes: HashMap::new(),
+//         right_to_result_edges: HashMap::new(),
+//         complement: BHyp::new(),
+//     };
     
-    let dot = dpo_to_dot_labelled(lhs, interface, rhs, result, &dpo_result);
-    let filename = format!("{}_dpo.dot", name);
-    match File::create(&filename) {
-        Ok(mut f) => {
-            if let Err(e) = f.write_all(dot.as_bytes()) {
-                eprintln!("Failed to write {}: {}", filename, e);
-            } else {
-                println!("✓ Exported {} DPO diagram to {}", name, filename);
-            }
-        }
-        Err(e) => eprintln!("Failed to create {}: {}", filename, e),
-    }
-}
+//     let dot = dpo_to_dot_labelled(lhs, interface, rhs, result, &dpo_result);
+//     let filename = format!("{}_dpo.dot", name);
+//     match File::create(&filename) {
+//         Ok(mut f) => {
+//             if let Err(e) = f.write_all(dot.as_bytes()) {
+//                 eprintln!("Failed to write {}: {}", filename, e);
+//             } else {
+//                 println!("✓ Exported {} DPO diagram to {}", name, filename);
+//             }
+//         }
+//         Err(e) => eprintln!("Failed to create {}: {}", filename, e),
+//     }
+// }
 
 /// Export a safety example with check results
 fn export_safety_example(name: &str, bhyp: &BHyp, expected_safe: bool) {
@@ -1077,8 +1077,6 @@ fn run_safety_examples() {
     println!("{}", g);
     export_safety_example("safety_unsafe_leaking_bound_variable", &g, false);
     export_bhyp_with_interface("output_leaking_interface", &BHyp_with_interface::from_bhyp(g.clone()));
-    let bg = safety::construct_body_hypergraph(&g,  EdgeId(1),0);
-    export_bhyp_with_interface("leaking_body", &BHyp_with_interface::from_bhyp(bg.unwrap()));
     println!("\n✓ Safety examples complete!");
 }
 
@@ -1129,7 +1127,7 @@ fn main() {
             let mut on_edges: HashMap<EdgeId, EdgeId> = HashMap::new();
             on_edges.insert(EdgeId(0), EdgeId(0));
             
-            let morphism = BHypMorphism::new(&domain, &codomain, on_nodes, on_edges)
+            let morphism = BHypMorphism::new(domain.clone(), codomain.clone(), on_nodes, on_edges)
                 .expect("Failed to create morphism");
             
             println!("\n=== Categorical Example: Morphism ===");
@@ -1145,39 +1143,39 @@ fn main() {
             export_bhyp("example_morphism_domain", &domain, true);
             export_bhyp("example_morphism_codomain", &codomain, true);
         }
-        "pushout" => {
-            let (c, pushout_obj, a, b) = example_pushout();
-            println!("\n=== Categorical Example: Pushout ===");
-            println!("Common vertex C:");
-            println!("{}", c);
-            println!("\nFirst graph A:");
-            println!("{}", a);
-            println!("\nSecond graph B:");
-            println!("{}", b);
-            println!("\nPushout object P:");
-            println!("{}", pushout_obj);
-            export_pushout_example("example_pushout", &c, &a, &b, &pushout_obj);
-            export_bhyp("example_pushout_a", &a, true);
-            export_bhyp("example_pushout_b", &b, true);
-            export_bhyp("example_pushout_result", &pushout_obj, true);
-        }
-        "dpo" => {
-            let (lhs, result, rhs, host) = example_dpo_rewriting();
-            println!("\n=== Categorical Example: DPO Rewriting ===");
-            println!("Left-hand side (pattern to match):");
-            println!("{}", lhs);
-            println!("\nRight-hand side (replacement):");
-            println!("{}", rhs);
-            println!("\nHost graph (to be rewritten):");
-            println!("{}", host);
-            println!("\nResult after DPO rewriting:");
-            println!("{}", result);
-            export_dpo_example("example_dpo", &lhs, &rhs, &rhs, &result);
-            export_bhyp("example_dpo_lhs", &lhs, true);
-            export_bhyp("example_dpo_rhs", &rhs, true);
-            export_bhyp("example_dpo_host", &host, true);
-            export_bhyp("example_dpo_result", &result, true);
-        }
+        // "pushout" => {
+        //     let (c, pushout_obj, a, b) = example_pushout();
+        //     println!("\n=== Categorical Example: Pushout ===");
+        //     println!("Common vertex C:");
+        //     println!("{}", c);
+        //     println!("\nFirst graph A:");
+        //     println!("{}", a);
+        //     println!("\nSecond graph B:");
+        //     println!("{}", b);
+        //     println!("\nPushout object P:");
+        //     println!("{}", pushout_obj);
+        //     export_pushout_example("example_pushout", &c, &a, &b, &pushout_obj);
+        //     export_bhyp("example_pushout_a", &a, true);
+        //     export_bhyp("example_pushout_b", &b, true);
+        //     export_bhyp("example_pushout_result", &pushout_obj, true);
+        // }
+        // "dpo" => {
+        //     let (lhs, result, rhs, host) = example_dpo_rewriting();
+        //     println!("\n=== Categorical Example: DPO Rewriting ===");
+        //     println!("Left-hand side (pattern to match):");
+        //     println!("{}", lhs);
+        //     println!("\nRight-hand side (replacement):");
+        //     println!("{}", rhs);
+        //     println!("\nHost graph (to be rewritten):");
+        //     println!("{}", host);
+        //     println!("\nResult after DPO rewriting:");
+        //     println!("{}", result);
+        //     export_dpo_example("example_dpo", &lhs, &rhs, &rhs, &result);
+        //     export_bhyp("example_dpo_lhs", &lhs, true);
+        //     export_bhyp("example_dpo_rhs", &rhs, true);
+        //     export_bhyp("example_dpo_host", &host, true);
+        //     export_bhyp("example_dpo_result", &result, true);
+        // }
         "safety" => {
             run_safety_examples();
         }
@@ -1225,7 +1223,7 @@ fn main() {
             let mut on_edges: HashMap<EdgeId, EdgeId> = HashMap::new();
             on_edges.insert(EdgeId(0), EdgeId(0));
             
-            let morphism = BHypMorphism::new(&domain, &codomain, on_nodes, on_edges)
+            let morphism = BHypMorphism::new(domain.clone(), codomain.clone(), on_nodes, on_edges)
                 .expect("Failed to create morphism");
             
             println!("=== Categorical Example: Morphism ===");
@@ -1238,29 +1236,29 @@ fn main() {
             export_bhyp("example_morphism_domain", &domain, true);
             export_bhyp("example_morphism_codomain", &codomain, true);
 
-            let (c, pushout_obj, a, b) = example_pushout();
-            println!("\n=== Categorical Example: Pushout ===");
-            println!("Common vertex C:");
-            println!("{}", c);
-            println!("\nFirst graph A: {} nodes, {} edges", a.nodes().len(), a.edges().len());
-            println!("Second graph B: {} nodes, {} edges", b.nodes().len(), b.edges().len());
-            println!("Pushout object P: {} nodes, {} edges", pushout_obj.nodes().len(), pushout_obj.edges().len());
-            export_pushout_example("example_pushout", &c, &a, &b, &pushout_obj);
-            export_bhyp("example_pushout_a", &a, true);
-            export_bhyp("example_pushout_b", &b, true);
-            export_bhyp("example_pushout_result", &pushout_obj, true);
+            // let (c, pushout_obj, a, b) = example_pushout();
+            // println!("\n=== Categorical Example: Pushout ===");
+            // println!("Common vertex C:");
+            // println!("{}", c);
+            // println!("\nFirst graph A: {} nodes, {} edges", a.nodes().len(), a.edges().len());
+            // println!("Second graph B: {} nodes, {} edges", b.nodes().len(), b.edges().len());
+            // println!("Pushout object P: {} nodes, {} edges", pushout_obj.nodes().len(), pushout_obj.edges().len());
+            // export_pushout_example("example_pushout", &c, &a, &b, &pushout_obj);
+            // export_bhyp("example_pushout_a", &a, true);
+            // export_bhyp("example_pushout_b", &b, true);
+            // export_bhyp("example_pushout_result", &pushout_obj, true);
 
-            let (lhs, result, rhs, host) = example_dpo_rewriting();
-            println!("\n=== Categorical Example: DPO Rewriting ===");
-            println!("Left-hand side: {} nodes, {} edges", lhs.nodes().len(), lhs.edges().len());
-            println!("Right-hand side: {} nodes, {} edges", rhs.nodes().len(), rhs.edges().len());
-            println!("Host graph: {} nodes, {} edges", host.nodes().len(), host.edges().len());
-            println!("Result: {} nodes, {} edges", result.nodes().len(), result.edges().len());
-            export_dpo_example("example_dpo", &lhs, &rhs, &rhs, &result);
-            export_bhyp("example_dpo_lhs", &lhs, true);
-            export_bhyp("example_dpo_rhs", &rhs, true);
-            export_bhyp("example_dpo_host", &host, true);
-            export_bhyp("example_dpo_result", &result, true);
+            // let (lhs, result, rhs, host) = example_dpo_rewriting();
+            // println!("\n=== Categorical Example: DPO Rewriting ===");
+            // println!("Left-hand side: {} nodes, {} edges", lhs.nodes().len(), lhs.edges().len());
+            // println!("Right-hand side: {} nodes, {} edges", rhs.nodes().len(), rhs.edges().len());
+            // println!("Host graph: {} nodes, {} edges", host.nodes().len(), host.edges().len());
+            // println!("Result: {} nodes, {} edges", result.nodes().len(), result.edges().len());
+            // export_dpo_example("example_dpo", &lhs, &rhs, &rhs, &result);
+            // export_bhyp("example_dpo_lhs", &lhs, true);
+            // export_bhyp("example_dpo_rhs", &rhs, true);
+            // export_bhyp("example_dpo_host", &host, true);
+            // export_bhyp("example_dpo_result", &result, true);
 
             // === Safety Examples ===
             run_safety_examples();

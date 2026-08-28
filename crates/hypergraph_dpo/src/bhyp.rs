@@ -719,273 +719,273 @@ impl fmt::Display for BHyp_with_interface {
 
 
 
-// ============================================================================
-// Copying and Glueing (Section 3.3.1)
-// ============================================================================
+// // ============================================================================
+// // Copying and Glueing (Section 3.3.1)
+// // ============================================================================
 
-/// Check if a subgraph satisfies conditions for safe copying (Definition 3.11)
-pub fn check_copy_conditions(
-    graph: &BHyp,
-    subgraph_edges: &HashSet<EdgeId>,
-    copy_vertex: NodeId,
-) -> Result<(), String> {
-    // Condition 1: For all e in subgraph, if e' is in body of e, then e' in subgraph
-    for &edge in subgraph_edges {
-        // Check all source indices with binding
-        if let Some(swbs) = graph.get_sources_with_binding(edge) {
-            for (i, swb) in swbs.iter().enumerate() {
-                if !swb.bound.is_empty() {
-                    // Compute body
-                    if let Some(body_edges) = graph.compute_body_edges(edge, i) {
-                        for &body_edge in &body_edges {
-                            if !subgraph_edges.contains(&body_edge) {
-                                return Err(format!(
-                                    "Edge {:?} is in body of {:?} but not in subgraph",
-                                    body_edge, edge
-                                ));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
+// /// Check if a subgraph satisfies conditions for safe copying (Definition 3.11)
+// pub fn check_copy_conditions(
+//     graph: &BHyp,
+//     subgraph_edges: &HashSet<EdgeId>,
+//     copy_vertex: NodeId,
+// ) -> Result<(), String> {
+//     // Condition 1: For all e in subgraph, if e' is in body of e, then e' in subgraph
+//     for &edge in subgraph_edges {
+//         // Check all source indices with binding
+//         if let Some(swbs) = graph.get_sources_with_binding(edge) {
+//             for (i, swb) in swbs.iter().enumerate() {
+//                 if !swb.bound.is_empty() {
+//                     // Compute body
+//                     if let Some(body_edges) = graph.compute_body_edges(edge, i) {
+//                         for &body_edge in &body_edges {
+//                             if !subgraph_edges.contains(&body_edge) {
+//                                 return Err(format!(
+//                                     "Edge {:?} is in body of {:?} but not in subgraph",
+//                                     body_edge, edge
+//                                 ));
+//                             }
+//                         }
+//                     }
+//                 }
+//             }
+//         }
+//     }
     
-    // Condition 2: When copying part of body with edges outside, need carrier edge
-    // (More complex check - simplified here)
+//     // Condition 2: When copying part of body with edges outside, need carrier edge
+//     // (More complex check - simplified here)
     
-    Ok(())
-}
+//     Ok(())
+// }
 
-/// Copy a subgraph rooted at a vertex with out-degree >= 2 (Definition 3.12)
-pub fn copy_subgraph(
-    graph: &BHyp_with_interface,
-    subgraph_edges: &HashSet<EdgeId>,
-    copy_vertex: NodeId,
-) -> Result<BHyp_with_interface, String> {
-    let n = graph.out_degree(copy_vertex);
-    if n < 2 {
-        return Err("Copy vertex must have out-degree >= 2".to_string());
-    }
+// /// Copy a subgraph rooted at a vertex with out-degree >= 2 (Definition 3.12)
+// pub fn copy_subgraph(
+//     graph: &BHyp_with_interface,
+//     subgraph_edges: &HashSet<EdgeId>,
+//     copy_vertex: NodeId,
+// ) -> Result<BHyp_with_interface, String> {
+//     let n = graph.out_degree(copy_vertex);
+//     if n < 2 {
+//         return Err("Copy vertex must have out-degree >= 2".to_string());
+//     }
     
-    // Check safety conditions
-    check_copy_conditions(graph.bhyp(), subgraph_edges, copy_vertex)?;
+//     // Check safety conditions
+//     check_copy_conditions(graph.bhyp(), subgraph_edges, copy_vertex)?;
     
-    // Collect subgraph nodes
-    let mut subgraph_nodes: HashSet<NodeId> = HashSet::new();
-    for &edge in subgraph_edges {
-        if let Some(sources) = graph.get_sources(edge) {
-            subgraph_nodes.extend(sources);
-        }
-        if let Some(targets) = graph.get_targets(edge) {
-            subgraph_nodes.extend(targets.iter().copied());
-        }
-        // Include bound nodes
-        if let Some(swbs) = graph.get_sources_with_binding(edge) {
-            for swb in swbs {
-                subgraph_nodes.extend(swb.bound.iter().copied());
-            }
-        }
-    }
+//     // Collect subgraph nodes
+//     let mut subgraph_nodes: HashSet<NodeId> = HashSet::new();
+//     for &edge in subgraph_edges {
+//         if let Some(sources) = graph.get_sources(edge) {
+//             subgraph_nodes.extend(sources);
+//         }
+//         if let Some(targets) = graph.get_targets(edge) {
+//             subgraph_nodes.extend(targets.iter().copied());
+//         }
+//         // Include bound nodes
+//         if let Some(swbs) = graph.get_sources_with_binding(edge) {
+//             for swb in swbs {
+//                 subgraph_nodes.extend(swb.bound.iter().copied());
+//             }
+//         }
+//     }
     
-    // Create n copies
-    let mut result = BHyp::new();
-    let mut orig_to_result: HashMap<NodeId, NodeId> = HashMap::new();
-    let mut copy_mappings: Vec<HashMap<NodeId, NodeId>> = Vec::new();
+//     // Create n copies
+//     let mut result = BHyp::new();
+//     let mut orig_to_result: HashMap<NodeId, NodeId> = HashMap::new();
+//     let mut copy_mappings: Vec<HashMap<NodeId, NodeId>> = Vec::new();
     
-    // Nodes outside subgraph are shared
-    for &node in graph.nodes() {
-        if !subgraph_nodes.contains(&node) {
-            let result_node = result.add_node();
-            orig_to_result.insert(node, result_node);
-        }
-    }
+//     // Nodes outside subgraph are shared
+//     for &node in graph.nodes() {
+//         if !subgraph_nodes.contains(&node) {
+//             let result_node = result.add_node();
+//             orig_to_result.insert(node, result_node);
+//         }
+//     }
     
-    // Create n copies of subgraph nodes (except the copy vertex which is shared)
-    for copy_idx in 0..n {
-        let mut this_copy: HashMap<NodeId, NodeId> = HashMap::new();
+//     // Create n copies of subgraph nodes (except the copy vertex which is shared)
+//     for copy_idx in 0..n {
+//         let mut this_copy: HashMap<NodeId, NodeId> = HashMap::new();
         
-        for &node in &subgraph_nodes {
-            if node == copy_vertex {
-                // copy_vertex is shared across all copies
-                if copy_idx == 0 {
-                    let result_node = result.add_node();
-                    orig_to_result.insert(node, result_node);
-                }
-                this_copy.insert(node, orig_to_result[&node]);
-            } else {
-                let result_node = result.add_node();
-                this_copy.insert(node, result_node);
-            }
-        }
-        copy_mappings.push(this_copy);
-    }
+//         for &node in &subgraph_nodes {
+//             if node == copy_vertex {
+//                 // copy_vertex is shared across all copies
+//                 if copy_idx == 0 {
+//                     let result_node = result.add_node();
+//                     orig_to_result.insert(node, result_node);
+//                 }
+//                 this_copy.insert(node, orig_to_result[&node]);
+//             } else {
+//                 let result_node = result.add_node();
+//                 this_copy.insert(node, result_node);
+//             }
+//         }
+//         copy_mappings.push(this_copy);
+//     }
     
-    // Copy edges outside subgraph
-    for &edge in graph.edges() {
-        if subgraph_edges.contains(&edge) {
-            continue;
-        }
+//     // Copy edges outside subgraph
+//     for &edge in graph.edges() {
+//         if subgraph_edges.contains(&edge) {
+//             continue;
+//         }
         
-        if let (Some(swbs), Some(targets)) = (
-            graph.get_sources_with_binding(edge),
-            graph.get_targets(edge),
-        ) {
-            let new_swbs: Vec<_> = swbs.iter()
-                .map(|swb| SourceWithBinding {
-                    source: orig_to_result[&swb.source],
-                    bound: swb.bound.iter().map(|&b| orig_to_result[&b]).collect(),
-                })
-                .collect();
-            let new_targets: Vec<_> = targets.iter()
-                .map(|&t| orig_to_result[&t])
-                .collect();
-            let label = graph.get_label(edge).cloned();
-            let _ = result.add_edge(new_swbs, new_targets, label);
-        }
-    }
+//         if let (Some(swbs), Some(targets)) = (
+//             graph.get_sources_with_binding(edge),
+//             graph.get_targets(edge),
+//         ) {
+//             let new_swbs: Vec<_> = swbs.iter()
+//                 .map(|swb| SourceWithBinding {
+//                     source: orig_to_result[&swb.source],
+//                     bound: swb.bound.iter().map(|&b| orig_to_result[&b]).collect(),
+//                 })
+//                 .collect();
+//             let new_targets: Vec<_> = targets.iter()
+//                 .map(|&t| orig_to_result[&t])
+//                 .collect();
+//             let label = graph.get_label(edge).cloned();
+//             let _ = result.add_edge(new_swbs, new_targets, label);
+//         }
+//     }
     
-    // Copy subgraph edges for each copy
-    for (copy_idx, copy_map) in copy_mappings.iter().enumerate() {
-        for &edge in subgraph_edges {
-            if let (Some(swbs), Some(targets)) = (
-                graph.get_sources_with_binding(edge),
-                graph.get_targets(edge),
-            ) {
-                let get_node = |n: &NodeId| -> NodeId {
-                    if let Some(&copied) = copy_map.get(n) {
-                        copied
-                    } else {
-                        orig_to_result[n]
-                    }
-                };
+//     // Copy subgraph edges for each copy
+//     for (copy_idx, copy_map) in copy_mappings.iter().enumerate() {
+//         for &edge in subgraph_edges {
+//             if let (Some(swbs), Some(targets)) = (
+//                 graph.get_sources_with_binding(edge),
+//                 graph.get_targets(edge),
+//             ) {
+//                 let get_node = |n: &NodeId| -> NodeId {
+//                     if let Some(&copied) = copy_map.get(n) {
+//                         copied
+//                     } else {
+//                         orig_to_result[n]
+//                     }
+//                 };
                 
-                let new_swbs: Vec<_> = swbs.iter()
-                    .map(|swb| SourceWithBinding {
-                        source: get_node(&swb.source),
-                        bound: swb.bound.iter().map(|b| get_node(b)).collect(),
-                    })
-                    .collect();
-                let new_targets: Vec<_> = targets.iter()
-                    .map(|t| get_node(t))
-                    .collect();
-                let label = graph.get_label(edge).cloned();
-                let _ = result.add_edge(new_swbs, new_targets, label);
-            }
-        }
-    }
+//                 let new_swbs: Vec<_> = swbs.iter()
+//                     .map(|swb| SourceWithBinding {
+//                         source: get_node(&swb.source),
+//                         bound: swb.bound.iter().map(|b| get_node(b)).collect(),
+//                     })
+//                     .collect();
+//                 let new_targets: Vec<_> = targets.iter()
+//                     .map(|t| get_node(t))
+//                     .collect();
+//                 let label = graph.get_label(edge).cloned();
+//                 let _ = result.add_edge(new_swbs, new_targets, label);
+//             }
+//         }
+//     }
     
-    Ok(BHyp_with_interface::from_bhyp(result))
-}
+//     Ok(BHyp_with_interface::from_bhyp(result))
+// }
 
-/// Glue multiple inclusions of a subgraph (Definition 3.15)
-pub fn glue_subgraph(
-    graph: &BHyp_with_interface,
-    inclusions: Vec<HashMap<NodeId, NodeId>>, // Maps from H nodes to G nodes
-) -> Result<BHyp_with_interface, String> {
-    if inclusions.is_empty() {
-        return Ok(graph.clone());
-    }
+// /// Glue multiple inclusions of a subgraph (Definition 3.15)
+// pub fn glue_subgraph(
+//     graph: &BHyp_with_interface,
+//     inclusions: Vec<HashMap<NodeId, NodeId>>, // Maps from H nodes to G nodes
+// ) -> Result<BHyp_with_interface, String> {
+//     if inclusions.is_empty() {
+//         return Ok(graph.clone());
+//     }
     
-    if inclusions.len() == 1 {
-        return Ok(graph.clone());
-    }
+//     if inclusions.len() == 1 {
+//         return Ok(graph.clone());
+//     }
     
-    // Build equivalence classes based on inclusions
-    // Nodes that are images of the same H node should be identified
+//     // Build equivalence classes based on inclusions
+//     // Nodes that are images of the same H node should be identified
     
-    let mut result = BHyp::new();
-    let mut node_equiv: HashMap<NodeId, NodeId> = HashMap::new();
+//     let mut result = BHyp::new();
+//     let mut node_equiv: HashMap<NodeId, NodeId> = HashMap::new();
     
-    // Initialize: each node is its own representative
-    for &node in graph.nodes() {
-        node_equiv.insert(node, node);
-    }
+//     // Initialize: each node is its own representative
+//     for &node in graph.nodes() {
+//         node_equiv.insert(node, node);
+//     }
     
-    // Union nodes that should be identified
-    // Get the first inclusion as reference
-    let first_inc = &inclusions[0];
-    let h_nodes: Vec<_> = first_inc.keys().collect();
+//     // Union nodes that should be identified
+//     // Get the first inclusion as reference
+//     let first_inc = &inclusions[0];
+//     let h_nodes: Vec<_> = first_inc.keys().collect();
     
-    for h_node in h_nodes {
-        // Get all images of this h_node
-        let mut images: Vec<NodeId> = Vec::new();
-        for inc in &inclusions {
-            if let Some(&img) = inc.get(h_node) {
-                images.push(img);
-            }
-        }
+//     for h_node in h_nodes {
+//         // Get all images of this h_node
+//         let mut images: Vec<NodeId> = Vec::new();
+//         for inc in &inclusions {
+//             if let Some(&img) = inc.get(h_node) {
+//                 images.push(img);
+//             }
+//         }
         
-        // All these images should be identified
-        if images.len() > 1 {
-            let rep = images[0];
-            for &img in &images[1..] {
-                // Union: make img point to rep
-                node_equiv.insert(img, rep);
-            }
-        }
-    }
+//         // All these images should be identified
+//         if images.len() > 1 {
+//             let rep = images[0];
+//             for &img in &images[1..] {
+//                 // Union: make img point to rep
+//                 node_equiv.insert(img, rep);
+//             }
+//         }
+//     }
     
-    // Find representatives (path compression)
-    fn find_rep(equiv: &HashMap<NodeId, NodeId>, node: NodeId) -> NodeId {
-        let mut current = node;
-        while equiv.get(&current) != Some(&current) && equiv.contains_key(&current) {
-            if let Some(&next) = equiv.get(&current) {
-                if next == current {
-                    break;
-                }
-                current = next;
-            } else {
-                break;
-            }
-        }
-        current
-    }
+//     // Find representatives (path compression)
+//     fn find_rep(equiv: &HashMap<NodeId, NodeId>, node: NodeId) -> NodeId {
+//         let mut current = node;
+//         while equiv.get(&current) != Some(&current) && equiv.contains_key(&current) {
+//             if let Some(&next) = equiv.get(&current) {
+//                 if next == current {
+//                     break;
+//                 }
+//                 current = next;
+//             } else {
+//                 break;
+//             }
+//         }
+//         current
+//     }
     
-    // Create result nodes (one per equivalence class)
-    let mut rep_to_result: HashMap<NodeId, NodeId> = HashMap::new();
-    let mut orig_to_result: HashMap<NodeId, NodeId> = HashMap::new();
+//     // Create result nodes (one per equivalence class)
+//     let mut rep_to_result: HashMap<NodeId, NodeId> = HashMap::new();
+//     let mut orig_to_result: HashMap<NodeId, NodeId> = HashMap::new();
     
-    for &node in graph.nodes() {
-        let rep = find_rep(&node_equiv, node);
-        if !rep_to_result.contains_key(&rep) {
-            let result_node = result.add_node();
-            rep_to_result.insert(rep, result_node);
-        }
-        orig_to_result.insert(node, rep_to_result[&rep]);
-    }
+//     for &node in graph.nodes() {
+//         let rep = find_rep(&node_equiv, node);
+//         if !rep_to_result.contains_key(&rep) {
+//             let result_node = result.add_node();
+//             rep_to_result.insert(rep, result_node);
+//         }
+//         orig_to_result.insert(node, rep_to_result[&rep]);
+//     }
     
-    // Copy edges, mapping nodes through equivalence
-    // Only copy each equivalence class of edges once
-    let mut processed_edges: HashSet<EdgeId> = HashSet::new();
+//     // Copy edges, mapping nodes through equivalence
+//     // Only copy each equivalence class of edges once
+//     let mut processed_edges: HashSet<EdgeId> = HashSet::new();
     
-    for &edge in graph.edges() {
-        if processed_edges.contains(&edge) {
-            continue;
-        }
+//     for &edge in graph.edges() {
+//         if processed_edges.contains(&edge) {
+//             continue;
+//         }
         
-        if let (Some(swbs), Some(targets)) = (
-            graph.get_sources_with_binding(edge),
-            graph.get_targets(edge),
-        ) {
-            let new_swbs: Vec<_> = swbs.iter()
-                .map(|swb| SourceWithBinding {
-                    source: orig_to_result[&swb.source],
-                    bound: swb.bound.iter().map(|&b| orig_to_result[&b]).collect(),
-                })
-                .collect();
-            let new_targets: Vec<_> = targets.iter()
-                .map(|&t| orig_to_result[&t])
-                .collect();
-            let label = graph.get_label(edge).cloned();
-            let _ = result.add_edge(new_swbs, new_targets, label);
-        }
+//         if let (Some(swbs), Some(targets)) = (
+//             graph.get_sources_with_binding(edge),
+//             graph.get_targets(edge),
+//         ) {
+//             let new_swbs: Vec<_> = swbs.iter()
+//                 .map(|swb| SourceWithBinding {
+//                     source: orig_to_result[&swb.source],
+//                     bound: swb.bound.iter().map(|&b| orig_to_result[&b]).collect(),
+//                 })
+//                 .collect();
+//             let new_targets: Vec<_> = targets.iter()
+//                 .map(|&t| orig_to_result[&t])
+//                 .collect();
+//             let label = graph.get_label(edge).cloned();
+//             let _ = result.add_edge(new_swbs, new_targets, label);
+//         }
         
-        processed_edges.insert(edge);
-    }
+//         processed_edges.insert(edge);
+//     }
     
-    Ok(BHyp_with_interface::from_bhyp(result))
-}
+//     Ok(BHyp_with_interface::from_bhyp(result))
+// }
 
 
 

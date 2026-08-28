@@ -1,13 +1,15 @@
-//! DOT language visualization for Hypergraphs with Binding
-//! 
-//! This module provides functions to generate GraphViz DOT format output
-//! for visualizing BHyp and BHyp_with_interface structures.
+// DOT language visualization for Hypergraphs with Binding
+// 
+// This module provides functions to generate GraphViz DOT format output
+// for visualizing BHyp and BHyp_with_interface structures, as well as
+// categorical constructions like morphisms, pushouts, pullbacks, and
+// pushout complements.
 
 use std::fmt::Write;
 use std::collections::HashSet;
 
 use crate::bhyp::{BHyp, BHyp_with_interface, Label, NodeId};
-use crate::categorical::{BHypMorphism, PushoutResult, DPOResult};
+use crate::categorical::{BHypMorphism, PushoutResult, PullbackResult, PushoutComplementResult};
 
 /// Configuration options for DOT visualization
 #[derive(Debug, Clone)]
@@ -34,6 +36,8 @@ pub struct DotConfig {
     pub font_name: String,
     /// Font size
     pub font_size: u32,
+    /// Whether to show detailed mappings in categorical diagrams
+    pub show_detailed_mappings: bool,
 }
 
 impl Default for DotConfig {
@@ -50,6 +54,7 @@ impl Default for DotConfig {
             metaedge_color: "orange".to_string(),
             font_name: "Helvetica".to_string(),
             font_size: 12,
+            show_detailed_mappings: true,
         }
     }
 }
@@ -70,7 +75,27 @@ impl DotConfig {
             ..Default::default()
         }
     }
+
+    /// Create a config without detailed mappings (cleaner categorical diagrams)
+    pub fn without_detailed_mappings() -> Self {
+        DotConfig {
+            show_detailed_mappings: false,
+            ..Default::default()
+        }
+    }
 }
+
+/// Format a label for display
+pub fn format_label(label: &Label) -> String {
+    match label {
+        Label::Symbol(s) => s.clone(),
+        Label::Meta(name, arity) => format!("{}:{}", name, arity),
+    }
+}
+
+// ============================================================================
+// Basic BHyp Visualization
+// ============================================================================
 
 /// Generate DOT representation for a BHyp
 pub fn bhyp_to_dot(bhyp: &BHyp, config: &DotConfig) -> String {
@@ -81,7 +106,6 @@ pub fn bhyp_to_dot(bhyp: &BHyp, config: &DotConfig) -> String {
 pub fn bhyp_to_dot_with_name(bhyp: &BHyp, name: &str, config: &DotConfig) -> String {
     let mut dot = String::new();
 
-    // Graph header
     writeln!(dot, "digraph {} {{", name).unwrap();
     writeln!(dot, "  fontname=\"{}\"", config.font_name).unwrap();
     writeln!(dot, "  fontsize={}", config.font_size).unwrap();
@@ -92,14 +116,12 @@ pub fn bhyp_to_dot_with_name(bhyp: &BHyp, name: &str, config: &DotConfig) -> Str
     writeln!(dot, "  edge [fontname=\"{}\", fontsize={}];", config.font_name, config.font_size).unwrap();
     writeln!(dot).unwrap();
 
-    // Collect bound nodes for special coloring
     let bound_nodes: HashSet<NodeId> = bhyp.edges().iter()
         .filter_map(|&e| bhyp.get_sources_with_binding(e))
         .flat_map(|swbs| swbs.iter())
         .flat_map(|swb| swb.bound.iter().copied())
         .collect();
 
-    // Generate nodes
     writeln!(dot, "  // Nodes").unwrap();
     for &node in bhyp.nodes() {
         let node_label = if config.show_node_ids {
@@ -122,7 +144,6 @@ pub fn bhyp_to_dot_with_name(bhyp: &BHyp, name: &str, config: &DotConfig) -> Str
     }
     writeln!(dot).unwrap();
 
-    // Generate edge nodes (hyperedges are represented as boxes)
     writeln!(dot, "  // Hyperedges").unwrap();
     for &edge in bhyp.edges() {
         let is_meta = bhyp.is_metaedge(edge);
@@ -148,12 +169,10 @@ pub fn bhyp_to_dot_with_name(bhyp: &BHyp, name: &str, config: &DotConfig) -> Str
     }
     writeln!(dot).unwrap();
 
-    // Generate edges (connections between nodes and hyperedges)
     writeln!(dot, "  // Source connections").unwrap();
     for &edge in bhyp.edges() {
         if let Some(swbs) = bhyp.get_sources_with_binding(edge) {
             for (i, swb) in swbs.iter().enumerate() {
-                // Source -> Edge connection
                 let source_label = if swbs.len() > 1 {
                     format!("{}", i)
                 } else {
@@ -165,7 +184,6 @@ pub fn bhyp_to_dot_with_name(bhyp: &BHyp, name: &str, config: &DotConfig) -> Str
                     swb.source.0, edge.0, source_label
                 ).unwrap();
 
-                // Binding connections (dashed, going to bound nodes)
                 for (j, &bound) in swb.bound.iter().enumerate() {
                     writeln!(
                         dot,
@@ -215,7 +233,7 @@ pub fn bhyp_with_interface_to_dot(bhyp_i: &BHyp_with_interface, config: &DotConf
     writeln!(dot, "  edge [fontname=\"{}\", fontsize={}];", config.font_name, config.font_size).unwrap();
     writeln!(dot).unwrap();
 
-    // Subgraph for input interface (I_G)
+    // Input interface subgraph
     writeln!(dot, "  subgraph cluster_input {{").unwrap();
     writeln!(dot, "    label=\"I_G\";").unwrap();
     writeln!(dot, "    style=dashed;").unwrap();
@@ -235,7 +253,7 @@ pub fn bhyp_with_interface_to_dot(bhyp_i: &BHyp_with_interface, config: &DotConf
     writeln!(dot, "  }}").unwrap();
     writeln!(dot).unwrap();
 
-    // Subgraph for the main hypergraph (G)
+    // Main hypergraph subgraph
     writeln!(dot, "  subgraph cluster_main {{").unwrap();
     writeln!(dot, "    label=\"G\";").unwrap();
     writeln!(dot, "    style=solid;").unwrap();
@@ -248,7 +266,6 @@ pub fn bhyp_with_interface_to_dot(bhyp_i: &BHyp_with_interface, config: &DotConf
         .flat_map(|swb| swb.bound.iter().copied())
         .collect();
 
-    // Nodes in main graph
     for &node in bhyp_i.nodes() {
         let label = if config.show_node_ids {
             format!("{}", node.0)
@@ -257,7 +274,7 @@ pub fn bhyp_with_interface_to_dot(bhyp_i: &BHyp_with_interface, config: &DotConf
         };
 
         let color = if input_nodes.contains(&node) && output_nodes.contains(&node) {
-            "purple" // Both input and output
+            "purple"
         } else if input_nodes.contains(&node) {
             &config.input_color
         } else if output_nodes.contains(&node) {
@@ -275,7 +292,6 @@ pub fn bhyp_with_interface_to_dot(bhyp_i: &BHyp_with_interface, config: &DotConf
         ).unwrap();
     }
 
-    // Hyperedges
     for &edge in bhyp_i.edges() {
         let is_meta = bhyp_i.bhyp().is_metaedge(edge);
         let label = if config.show_labels {
@@ -299,7 +315,6 @@ pub fn bhyp_with_interface_to_dot(bhyp_i: &BHyp_with_interface, config: &DotConf
         ).unwrap();
     }
 
-    // Source and target connections within main graph
     for &edge in bhyp_i.edges() {
         if let Some(swbs) = bhyp_i.get_sources_with_binding(edge) {
             for (i, swb) in swbs.iter().enumerate() {
@@ -325,7 +340,7 @@ pub fn bhyp_with_interface_to_dot(bhyp_i: &BHyp_with_interface, config: &DotConf
     writeln!(dot, "  }}").unwrap();
     writeln!(dot).unwrap();
 
-    // Subgraph for output interface (O_G)
+    // Output interface subgraph
     writeln!(dot, "  subgraph cluster_output {{").unwrap();
     writeln!(dot, "    label=\"O_G\";").unwrap();
     writeln!(dot, "    style=dashed;").unwrap();
@@ -345,7 +360,7 @@ pub fn bhyp_with_interface_to_dot(bhyp_i: &BHyp_with_interface, config: &DotConf
     writeln!(dot, "  }}").unwrap();
     writeln!(dot).unwrap();
 
-    // Interface morphisms (I_G -> G and O_G -> G)
+    // Interface morphisms
     writeln!(dot, "  // Interface morphisms").unwrap();
     for (iface_node, &bhyp_node) in bhyp_i.input_map() {
         writeln!(
@@ -375,7 +390,6 @@ pub fn bhyp_with_interface_cospan_to_dot(bhyp_i: &BHyp_with_interface, config: &
     writeln!(dot, "  rankdir=LR;").unwrap();
     writeln!(dot).unwrap();
 
-    // Three boxes for I_G, G, O_G
     writeln!(dot, "  I_G [label=\"I_G\\n({} nodes)\", shape=box, style=filled, fillcolor=lightgreen];",
              bhyp_i.input_interface().nodes().len()).unwrap();
     writeln!(dot, "  G [label=\"G\\n({} nodes, {} edges)\", shape=box, style=filled, fillcolor=lightblue];",
@@ -383,7 +397,6 @@ pub fn bhyp_with_interface_cospan_to_dot(bhyp_i: &BHyp_with_interface, config: &
     writeln!(dot, "  O_G [label=\"O_G\\n({} nodes)\", shape=box, style=filled, fillcolor=lightcoral];",
              bhyp_i.output_interface().nodes().len()).unwrap();
 
-    // Arrows representing the cospan
     writeln!(dot, "  I_G -> G [label=\"\"];").unwrap();
     writeln!(dot, "  O_G -> G [label=\"\", dir=back];").unwrap();
 
@@ -420,32 +433,13 @@ pub fn discrete_bhyp_to_dot(bhyp: &BHyp, name: &str, config: &DotConfig) -> Stri
     dot
 }
 
-/// Convenience function to generate labelled DOT
-pub fn bhyp_to_dot_labelled(bhyp: &BHyp) -> String {
-    bhyp_to_dot(bhyp, &DotConfig::default())
-}
-
-/// Convenience function to generate unlabelled DOT
-pub fn bhyp_to_dot_unlabelled(bhyp: &BHyp) -> String {
-    bhyp_to_dot(bhyp, &DotConfig::unlabelled())
-}
-
-/// Convenience function for BHyp_with_interface labelled
-pub fn bhyp_with_interface_to_dot_labelled(bhyp_i: &BHyp_with_interface) -> String {
-    bhyp_with_interface_to_dot(bhyp_i, &DotConfig::default())
-}
-
-/// Convenience function for BHyp_with_interface unlabelled
-pub fn bhyp_with_interface_to_dot_unlabelled(bhyp_i: &BHyp_with_interface) -> String {
-    bhyp_with_interface_to_dot(bhyp_i, &DotConfig::unlabelled())
-}
-
 // ============================================================================
-// Categorical Visualization: Morphisms, Pushouts, and DPO
+// Categorical Visualization: Core Building Blocks
 // ============================================================================
 
 /// Helper: Generate DOT for a BHyp as a subgraph/cluster with prefixed IDs
-fn bhyp_to_subgraph(
+/// This is the core reusable component for categorical diagrams
+pub fn bhyp_to_subgraph(
     bhyp: &BHyp,
     cluster_name: &str,
     label: &str,
@@ -463,7 +457,6 @@ fn bhyp_to_subgraph(
     writeln!(dot, "    fontsize={};", config.font_size).unwrap();
     writeln!(dot).unwrap();
 
-    // Collect bound nodes
     let bound_nodes: HashSet<NodeId> = bhyp.edges().iter()
         .filter_map(|&e| bhyp.get_sources_with_binding(e))
         .flat_map(|swbs| swbs.iter())
@@ -515,7 +508,7 @@ fn bhyp_to_subgraph(
         ).unwrap();
     }
 
-    // Internal edges (source -> hyperedge -> target)
+    // Internal edges
     for &edge in bhyp.edges() {
         if let Some(swbs) = bhyp.get_sources_with_binding(edge) {
             for (i, swb) in swbs.iter().enumerate() {
@@ -547,7 +540,7 @@ fn bhyp_to_subgraph(
         }
     }
 
-    // Add an invisible anchor node for cluster-level edges
+    // Invisible anchor node for cluster-level edges
     writeln!(
         dot,
         "    {}_anchor [shape=point, width=0, height=0, style=invis];",
@@ -558,9 +551,67 @@ fn bhyp_to_subgraph(
     dot
 }
 
+/// Helper: Generate DOT edges for morphism mappings between two subgraphs
+/// Reusable component for drawing morphism arrows
+fn morphism_mappings_to_dot(
+    morphism: &BHypMorphism,
+    from_prefix: &str,
+    to_prefix: &str,
+    node_color: &str,
+    edge_color: &str,
+    config: &DotConfig,
+) -> String {
+    let mut dot = String::new();
+
+    if !config.show_detailed_mappings {
+        return dot;
+    }
+
+    // Node mappings
+    for (&from_node, &to_node) in morphism.on_nodes() {
+        writeln!(
+            dot,
+            "  {}_n{} -> {}_n{} [style=dotted, color={}, constraint=false];",
+            from_prefix, from_node.0, to_prefix, to_node.0, node_color
+        ).unwrap();
+    }
+
+    // Edge mappings
+    for (&from_edge, &to_edge) in morphism.on_edges() {
+        writeln!(
+            dot,
+            "  {}_e{} -> {}_e{} [style=dotted, color={}, constraint=false];",
+            from_prefix, from_edge.0, to_prefix, to_edge.0, edge_color
+        ).unwrap();
+    }
+
+    dot
+}
+
+// ============================================================================
+// Morphism Visualization
+// ============================================================================
+
 /// Generate DOT representation for a morphism between two BHyp objects
 /// Shows domain and codomain as side-by-side subgraphs with mapping arrows
 pub fn morphism_to_dot(morphism: &BHypMorphism, config: &DotConfig) -> String {
+    morphism_to_dot_with_labels(
+        morphism,
+        "Domain (A)",
+        "Codomain (B)",
+        "f",
+        config,
+    )
+}
+
+/// Generate DOT representation for a morphism with custom labels
+pub fn morphism_to_dot_with_labels(
+    morphism: &BHypMorphism,
+    domain_label: &str,
+    codomain_label: &str,
+    morphism_label: &str,
+    config: &DotConfig,
+) -> String {
     let mut dot = String::new();
 
     writeln!(dot, "digraph Morphism {{").unwrap();
@@ -575,7 +626,7 @@ pub fn morphism_to_dot(morphism: &BHypMorphism, config: &DotConfig) -> String {
     dot.push_str(&bhyp_to_subgraph(
         morphism.domain(),
         "domain",
-        "Domain (A)",
+        domain_label,
         "lightblue",
         "dom",
         config,
@@ -586,277 +637,305 @@ pub fn morphism_to_dot(morphism: &BHypMorphism, config: &DotConfig) -> String {
     dot.push_str(&bhyp_to_subgraph(
         morphism.codomain(),
         "codomain",
-        "Codomain (B)",
+        codomain_label,
         "lightcoral",
         "cod",
         config,
     ));
     writeln!(dot).unwrap();
 
-    // Morphism arrows (node mappings)
-    writeln!(dot, "  // Morphism: node mappings").unwrap();
-    for (&domain_node, &codomain_node) in morphism.on_nodes() {
-        writeln!(
-            dot,
-            "  dom_n{} -> cod_n{} [style=dashed, color=forestgreen, penwidth=1.5, constraint=false];",
-            domain_node.0, codomain_node.0
-        ).unwrap();
-    }
+    // Morphism mappings
+    writeln!(dot, "  // Morphism mappings").unwrap();
+    dot.push_str(&morphism_mappings_to_dot(
+        morphism,
+        "dom",
+        "cod",
+        "forestgreen",
+        "purple",
+        config,
+    ));
 
-    // Edge mappings (if available)
-    writeln!(dot, "  // Morphism: edge mappings").unwrap();
-    for (&domain_edge, &codomain_edge) in morphism.on_edges() {
-        writeln!(
-            dot,
-            "  dom_e{} -> cod_e{} [style=dashed, color=purple, penwidth=1.5, constraint=false];",
-            domain_edge.0, codomain_edge.0
-        ).unwrap();
-    }
-
-    // Overall morphism arrow between clusters
+    // Cluster-level morphism arrow
     writeln!(dot).unwrap();
     writeln!(dot, "  // Cluster-level morphism arrow").unwrap();
     writeln!(
         dot,
-        "  dom_anchor -> cod_anchor [lhead=cluster_codomain, ltail=cluster_domain, style=bold, color=black, label=\"f\", penwidth=2];",
+        "  dom_anchor -> cod_anchor [lhead=cluster_codomain, ltail=cluster_domain, style=bold, color=black, label=\"{}\", penwidth=2];",
+        morphism_label
     ).unwrap();
 
     writeln!(dot, "}}").unwrap();
     dot
 }
 
-/// Generate DOT representation for a pushout square
-/// Renders: C → A, C → B, A → P, B → P with each object as a visualized BHyp
-pub fn pushout_to_dot(
-    c: &BHyp,           // The common "corner" (pullback object in the span)
-    a: &BHyp,           // First leg
-    b: &BHyp,           // Second leg
-    pushout_result: &PushoutResult,
-    config: &DotConfig,
-) -> String {
+// ============================================================================
+// Pushout Visualization
+// ============================================================================
+
+/// Configuration for a single object in a categorical square diagram
+struct SquareObjectConfig<'a> {
+    bhyp: &'a BHyp,
+    cluster_name: &'a str,
+    label: &'a str,
+    fill_color: &'a str,
+    id_prefix: &'a str,
+}
+
+/// Generate the header for a categorical square diagram
+fn categorical_square_header(title: &str, config: &DotConfig) -> String {
     let mut dot = String::new();
 
-    writeln!(dot, "digraph PushoutSquare {{").unwrap();
+    writeln!(dot, "digraph CategoricalSquare {{").unwrap();
     writeln!(dot, "  fontname=\"{}\"", config.font_name).unwrap();
     writeln!(dot, "  fontsize={}", config.font_size).unwrap();
     writeln!(dot, "  compound=true;").unwrap();
     writeln!(dot, "  newrank=true;").unwrap();
     writeln!(dot, "  splines=ortho;").unwrap();
+    if !title.is_empty() {
+        writeln!(dot, "  label=\"{}\";", title).unwrap();
+        writeln!(dot, "  labelloc=t;").unwrap();
+    }
     writeln!(dot).unwrap();
 
-    // Position clusters in a 2x2 grid using subgraphs with rank
-    // Top row: C, A
-    // Bottom row: B, P
+    dot
+}
 
+/// Generate DOT representation for a pushout square using the new categorical result types
+///
+/// ```text
+///     A ---f---> B
+///     |          |
+///     g          g'
+///     |          |
+///     v          v
+///     C ---f'--> D (pushout)
+/// ```
+pub fn pushout_to_dot(
+    f: &BHypMorphism,  // f: A -> B
+    g: &BHypMorphism,  // g: A -> C
+    result: &PushoutResult,
+    config: &DotConfig,
+) -> String {
+    let mut dot = categorical_square_header("Pushout Square", config);
+
+    let a = f.domain();  // Common domain
+    let b = f.codomain();
+    let c = g.codomain();
+    let d = &result.pushout;
+
+    // Top row: A, B
     writeln!(dot, "  // Top row").unwrap();
     writeln!(dot, "  subgraph top_row {{").unwrap();
     writeln!(dot, "    rank=same;").unwrap();
-    dot.push_str(&bhyp_to_subgraph(c, "C", "C (span apex)", "lightgreen", "c", config));
-    dot.push_str(&bhyp_to_subgraph(a, "A", "A", "lightblue", "a", config));
+    dot.push_str(&bhyp_to_subgraph(a, "A", "A (span apex)", "lightgreen", "a", config));
+    dot.push_str(&bhyp_to_subgraph(b, "B", "B", "lightblue", "b", config));
     writeln!(dot, "  }}").unwrap();
     writeln!(dot).unwrap();
 
+    // Bottom row: C, D
     writeln!(dot, "  // Bottom row").unwrap();
     writeln!(dot, "  subgraph bottom_row {{").unwrap();
     writeln!(dot, "    rank=same;").unwrap();
-    dot.push_str(&bhyp_to_subgraph(b, "B", "B", "lightyellow", "b", config));
-    dot.push_str(&bhyp_to_subgraph(
-        &pushout_result.pushout,
-        "P",
-        "P (pushout)",
-        "lightcoral",
-        "p",
-        config,
-    ));
+    dot.push_str(&bhyp_to_subgraph(c, "C", "C", "lightyellow", "c", config));
+    dot.push_str(&bhyp_to_subgraph(d, "D", "D (pushout)", "lightcoral", "d", config));
     writeln!(dot, "  }}").unwrap();
     writeln!(dot).unwrap();
 
-    // Morphism arrows between clusters (forming the square)
+    // Square morphism arrows
     writeln!(dot, "  // Pushout square morphisms").unwrap();
 
-    // C → A (f)
+    // A → B (f)
     writeln!(
         dot,
-        "  c_anchor -> a_anchor [ltail=cluster_C, lhead=cluster_A, label=\"f\", style=bold, penwidth=2];",
+        "  a_anchor -> b_anchor [ltail=cluster_A, lhead=cluster_B, label=\"f\", style=bold, penwidth=2];",
     ).unwrap();
 
-    // C → B (g)
+    // A → C (g)
     writeln!(
         dot,
-        "  c_anchor -> b_anchor [ltail=cluster_C, lhead=cluster_B, label=\"g\", style=bold, penwidth=2];",
+        "  a_anchor -> c_anchor [ltail=cluster_A, lhead=cluster_C, label=\"g\", style=bold, penwidth=2];",
     ).unwrap();
 
-    // A → P (f')
+    // B → D (g')
     writeln!(
         dot,
-        "  a_anchor -> p_anchor [ltail=cluster_A, lhead=cluster_P, label=\"f'\", style=bold, penwidth=2];",
+        "  b_anchor -> d_anchor [ltail=cluster_B, lhead=cluster_D, label=\"g'\", style=bold, penwidth=2];",
     ).unwrap();
 
-    // B → P (g')
+    // C → D (f')
     writeln!(
         dot,
-        "  b_anchor -> p_anchor [ltail=cluster_B, lhead=cluster_P, label=\"g'\", style=bold, penwidth=2];",
+        "  c_anchor -> d_anchor [ltail=cluster_C, lhead=cluster_D, label=\"f'\", style=bold, penwidth=2];",
     ).unwrap();
 
-    // Optional: Show node mappings within the morphisms
+    // Detailed mappings using the morphisms from the result
+    if config.show_detailed_mappings {
+        writeln!(dot).unwrap();
+        writeln!(dot, "  // Detailed mappings (f: A -> B)").unwrap();
+        dot.push_str(&morphism_mappings_to_dot(f, "a", "b", "blue", "purple", config));
+
+        writeln!(dot, "  // Detailed mappings (g: A -> C)").unwrap();
+        dot.push_str(&morphism_mappings_to_dot(g, "a", "c", "green", "purple", config));
+
+        writeln!(dot, "  // Detailed mappings (g': B -> D)").unwrap();
+        dot.push_str(&morphism_mappings_to_dot(&result.morphism_from_b, "b", "d", "orange", "purple", config));
+
+        writeln!(dot, "  // Detailed mappings (f': C -> D)").unwrap();
+        dot.push_str(&morphism_mappings_to_dot(&result.morphism_from_c, "c", "d", "brown", "purple", config));
+    }
+
+    // Pushout symbol
     writeln!(dot).unwrap();
-    writeln!(dot, "  // Detailed node mappings (f': A → P)").unwrap();
-    for (&a_node, &p_node) in &pushout_result.first_to_pushout_nodes {
-        writeln!(
-            dot,
-            "  a_n{} -> p_n{} [style=dotted, color=blue, constraint=false];",
-            a_node.0, p_node.0
-        ).unwrap();
-    }
-
-    writeln!(dot, "  // Detailed node mappings (g': B → P)").unwrap();
-    for (&b_node, &p_node) in &pushout_result.second_to_pushout_nodes {
-        writeln!(
-            dot,
-            "  b_n{} -> p_n{} [style=dotted, color=orange, constraint=false];",
-            b_node.0, p_node.0
-        ).unwrap();
-    }
+    writeln!(dot, "  po_symbol [label=\"PO\", shape=none, fontsize=10, fontcolor=gray];").unwrap();
 
     writeln!(dot, "}}").unwrap();
     dot
 }
 
-/// Generate DOT representation for a pullback square
-/// Renders: P → A, P → B, A → C, B → C with each object as a visualized BHyp
+// ============================================================================
+// Pullback Visualization
+// ============================================================================
+
+/// Generate DOT representation for a pullback square using the new categorical result types
+///
+/// ```text
+///     P ---π₁---> B
+///     |           |
+///     π₂          f
+///     |           |
+///     v           v
+///     C ---g----> D (cospan apex)
+/// ```
 pub fn pullback_to_dot(
-    c: &BHyp,           // The common "corner" (pushout object in the cospan)
-    a: &BHyp,           // First leg
-    b: &BHyp,           // Second leg
-    pullback: &BHyp,    // The pullback object
-    morphism_p_to_a: &BHypMorphism,
-    morphism_p_to_b: &BHypMorphism,
+    f: &BHypMorphism,  // f: B -> D
+    g: &BHypMorphism,  // g: C -> D
+    result: &PullbackResult,
     config: &DotConfig,
 ) -> String {
-    let mut dot = String::new();
+    let mut dot = categorical_square_header("Pullback Square", config);
 
-    writeln!(dot, "digraph PullbackSquare {{").unwrap();
-    writeln!(dot, "  fontname=\"{}\"", config.font_name).unwrap();
-    writeln!(dot, "  fontsize={}", config.font_size).unwrap();
-    writeln!(dot, "  compound=true;").unwrap();
-    writeln!(dot, "  newrank=true;").unwrap();
-    writeln!(dot, "  splines=ortho;").unwrap();
-    writeln!(dot).unwrap();
+    let b = f.domain();
+    let c = g.domain();
+    let d = f.codomain();  // Common codomain
+    let p = &result.pullback;
 
-    // Position clusters in a 2x2 grid
-    // Top row: P (pullback), A
-    // Bottom row: B, C
-
+    // Top row: P, B
     writeln!(dot, "  // Top row").unwrap();
     writeln!(dot, "  subgraph top_row {{").unwrap();
     writeln!(dot, "    rank=same;").unwrap();
-    dot.push_str(&bhyp_to_subgraph(pullback, "P", "P (pullback)", "lightcoral", "p", config));
-    dot.push_str(&bhyp_to_subgraph(a, "A", "A", "lightblue", "a", config));
+    dot.push_str(&bhyp_to_subgraph(p, "P", "P (pullback)", "lightcoral", "p", config));
+    dot.push_str(&bhyp_to_subgraph(b, "B", "B", "lightblue", "b", config));
     writeln!(dot, "  }}").unwrap();
     writeln!(dot).unwrap();
 
+    // Bottom row: C, D
     writeln!(dot, "  // Bottom row").unwrap();
     writeln!(dot, "  subgraph bottom_row {{").unwrap();
     writeln!(dot, "    rank=same;").unwrap();
-    dot.push_str(&bhyp_to_subgraph(b, "B", "B", "lightyellow", "b", config));
-    dot.push_str(&bhyp_to_subgraph(c, "C", "C (cospan apex)", "lightgreen", "c", config));
+    dot.push_str(&bhyp_to_subgraph(c, "C", "C", "lightyellow", "c", config));
+    dot.push_str(&bhyp_to_subgraph(d, "D", "D (cospan apex)", "lightgreen", "d", config));
     writeln!(dot, "  }}").unwrap();
     writeln!(dot).unwrap();
 
-    // Morphism arrows between clusters (forming the square)
+    // Square morphism arrows
     writeln!(dot, "  // Pullback square morphisms").unwrap();
 
-    // P → A (π₁)
+    // P → B (π₁)
     writeln!(
         dot,
-        "  p_anchor -> a_anchor [ltail=cluster_P, lhead=cluster_A, label=\"π₁\", style=bold, penwidth=2];",
+        "  p_anchor -> b_anchor [ltail=cluster_P, lhead=cluster_B, label=\"π₁\", style=bold, penwidth=2];",
     ).unwrap();
 
-    // P → B (π₂)
+    // P → C (π₂)
     writeln!(
         dot,
-        "  p_anchor -> b_anchor [ltail=cluster_P, lhead=cluster_B, label=\"π₂\", style=bold, penwidth=2];",
+        "  p_anchor -> c_anchor [ltail=cluster_P, lhead=cluster_C, label=\"π₂\", style=bold, penwidth=2];",
     ).unwrap();
 
-    // A → C (f)
+    // B → D (f)
     writeln!(
         dot,
-        "  a_anchor -> c_anchor [ltail=cluster_A, lhead=cluster_C, label=\"f\", style=bold, penwidth=2];",
+        "  b_anchor -> d_anchor [ltail=cluster_B, lhead=cluster_D, label=\"f\", style=bold, penwidth=2];",
     ).unwrap();
 
-    // B → C (g)
+    // C → D (g)
     writeln!(
         dot,
-        "  b_anchor -> c_anchor [ltail=cluster_B, lhead=cluster_C, label=\"g\", style=bold, penwidth=2];",
+        "  c_anchor -> d_anchor [ltail=cluster_C, lhead=cluster_D, label=\"g\", style=bold, penwidth=2];",
     ).unwrap();
 
-    // Detailed node mappings
+    // Detailed mappings
+    if config.show_detailed_mappings {
+        writeln!(dot).unwrap();
+        writeln!(dot, "  // Detailed mappings (π₁: P -> B)").unwrap();
+        dot.push_str(&morphism_mappings_to_dot(&result.morphism_to_b, "p", "b", "blue", "purple", config));
+
+        writeln!(dot, "  // Detailed mappings (π₂: P -> C)").unwrap();
+        dot.push_str(&morphism_mappings_to_dot(&result.morphism_to_c, "p", "c", "orange", "purple", config));
+
+        writeln!(dot, "  // Detailed mappings (f: B -> D)").unwrap();
+        dot.push_str(&morphism_mappings_to_dot(f, "b", "d", "green", "purple", config));
+
+        writeln!(dot, "  // Detailed mappings (g: C -> D)").unwrap();
+        dot.push_str(&morphism_mappings_to_dot(g, "c", "d", "brown", "purple", config));
+    }
+
+    // Pullback symbol
     writeln!(dot).unwrap();
-    writeln!(dot, "  // Detailed node mappings (π₁: P → A)").unwrap();
-    for (&p_node, &a_node) in morphism_p_to_a.on_nodes() {
-        writeln!(
-            dot,
-            "  p_n{} -> a_n{} [style=dotted, color=blue, constraint=false];",
-            p_node.0, a_node.0
-        ).unwrap();
-    }
-
-    writeln!(dot, "  // Detailed node mappings (π₂: P → B)").unwrap();
-    for (&p_node, &b_node) in morphism_p_to_b.on_nodes() {
-        writeln!(
-            dot,
-            "  p_n{} -> b_n{} [style=dotted, color=orange, constraint=false];",
-            p_node.0, b_node.0
-        ).unwrap();
-    }
+    writeln!(dot, "  pb_symbol [label=\"PB\", shape=none, fontsize=10, fontcolor=gray];").unwrap();
 
     writeln!(dot, "}}").unwrap();
     dot
 }
 
-/// Generate DOT representation for a pushout complement
-/// Given L ← K → G, find D such that L → D ← K and D → G form a pushout
+// ============================================================================
+// Pushout Complement Visualization
+// ============================================================================
+
+/// Generate DOT representation for a pushout complement square
+///
+/// Given l: K -> L and m: L -> G, the pushout complement is:
+/// ```text
+///     K ---l---> L
+///     |          |
+///     k          m
+///     |          |
+///     v          v
+///     C -------> G
+/// ```
+/// where the square is a pushout
 pub fn pushout_complement_to_dot(
-    l: &BHyp,           // Left object
-    k: &BHyp,           // Interface
-    g: &BHyp,           // Host graph
-    d: &BHyp,           // Pushout complement (context)
-    _morphism_k_to_l: &BHypMorphism,
-    _morphism_k_to_d: &BHypMorphism,
-    _morphism_l_to_g: &BHypMorphism,
-    _morphism_d_to_g: &BHypMorphism,
+    l: &BHypMorphism,  // l: K -> L
+    m: &BHypMorphism,  // m: L -> G
+    result: &PushoutComplementResult,
     config: &DotConfig,
 ) -> String {
-    let mut dot = String::new();
+    let mut dot = categorical_square_header("Pushout Complement Construction", config);
 
-    writeln!(dot, "digraph PushoutComplement {{").unwrap();
-    writeln!(dot, "  fontname=\"{}\"", config.font_name).unwrap();
-    writeln!(dot, "  fontsize={}", config.font_size).unwrap();
-    writeln!(dot, "  compound=true;").unwrap();
-    writeln!(dot, "  newrank=true;").unwrap();
-    writeln!(dot, "  splines=ortho;").unwrap();
-    writeln!(dot, "  label=\"Pushout Complement Construction\";").unwrap();
-    writeln!(dot, "  labelloc=t;").unwrap();
-    writeln!(dot).unwrap();
+    let k = l.domain();
+    let l_bhyp = l.codomain();
+    let g = m.codomain();
+    let c = &result.complement;
 
-    // Position: K at top-left, L at top-right, D at bottom-left, G at bottom-right
-    writeln!(dot, "  // Top row: K → L").unwrap();
+    // Top row: K, L
+    writeln!(dot, "  // Top row: K -> L").unwrap();
     writeln!(dot, "  subgraph top_row {{").unwrap();
     writeln!(dot, "    rank=same;").unwrap();
     dot.push_str(&bhyp_to_subgraph(k, "K", "K (interface)", "lightgreen", "k", config));
-    dot.push_str(&bhyp_to_subgraph(l, "L", "L (pattern)", "lightblue", "l", config));
+    dot.push_str(&bhyp_to_subgraph(l_bhyp, "L", "L (pattern)", "lightblue", "l", config));
     writeln!(dot, "  }}").unwrap();
     writeln!(dot).unwrap();
 
-    writeln!(dot, "  // Bottom row: D → G").unwrap();
+    // Bottom row: C, G
+    writeln!(dot, "  // Bottom row: C -> G").unwrap();
     writeln!(dot, "  subgraph bottom_row {{").unwrap();
     writeln!(dot, "    rank=same;").unwrap();
-    dot.push_str(&bhyp_to_subgraph(d, "D", "D (complement)", "lightyellow", "d", config));
+    dot.push_str(&bhyp_to_subgraph(c, "C", "C (complement)", "lightyellow", "c", config));
     dot.push_str(&bhyp_to_subgraph(g, "G", "G (host)", "lightcoral", "g", config));
     writeln!(dot, "  }}").unwrap();
     writeln!(dot).unwrap();
 
-    // Morphism arrows
+    // Square morphism arrows
     writeln!(dot, "  // Pushout complement square").unwrap();
 
     // K → L (l)
@@ -865,10 +944,10 @@ pub fn pushout_complement_to_dot(
         "  k_anchor -> l_anchor [ltail=cluster_K, lhead=cluster_L, label=\"l\", style=bold, penwidth=2];",
     ).unwrap();
 
-    // K → D (d)
+    // K → C (k)
     writeln!(
         dot,
-        "  k_anchor -> d_anchor [ltail=cluster_K, lhead=cluster_D, label=\"d\", style=bold, penwidth=2];",
+        "  k_anchor -> c_anchor [ltail=cluster_K, lhead=cluster_C, label=\"k\", style=bold, penwidth=2];",
     ).unwrap();
 
     // L → G (m: match)
@@ -877,200 +956,59 @@ pub fn pushout_complement_to_dot(
         "  l_anchor -> g_anchor [ltail=cluster_L, lhead=cluster_G, label=\"m\", style=bold, penwidth=2];",
     ).unwrap();
 
-    // D → G (d')
+    // C → G (c)
     writeln!(
         dot,
-        "  d_anchor -> g_anchor [ltail=cluster_D, lhead=cluster_G, label=\"d'\", style=bold, penwidth=2];",
+        "  c_anchor -> g_anchor [ltail=cluster_C, lhead=cluster_G, label=\"c\", style=bold, penwidth=2];",
     ).unwrap();
 
-    // Pushout indicator
+    // Detailed mappings using the morphisms from the result
+    if config.show_detailed_mappings {
+        writeln!(dot).unwrap();
+        writeln!(dot, "  // Detailed mappings (l: K -> L)").unwrap();
+        dot.push_str(&morphism_mappings_to_dot(l, "k", "l", "blue", "purple", config));
+
+        writeln!(dot, "  // Detailed mappings (k: K -> C)").unwrap();
+        dot.push_str(&morphism_mappings_to_dot(&result.morphism_from_a, "k", "c", "green", "purple", config));
+
+        writeln!(dot, "  // Detailed mappings (m: L -> G)").unwrap();
+        dot.push_str(&morphism_mappings_to_dot(m, "l", "g", "orange", "purple", config));
+
+        writeln!(dot, "  // Detailed mappings (c: C -> G)").unwrap();
+        dot.push_str(&morphism_mappings_to_dot(&result.morphism_to_b, "c", "g", "brown", "purple", config));
+    }
+
+    // Pushout symbol
     writeln!(dot).unwrap();
-    writeln!(dot, "  // Pushout symbol").unwrap();
-    writeln!(
-        dot,
-        "  po_symbol [label=\"PO\", shape=none, fontsize=10, fontcolor=gray];",
-    ).unwrap();
+    writeln!(dot, "  po_symbol [label=\"PO\", shape=none, fontsize=10, fontcolor=gray];").unwrap();
 
     writeln!(dot, "}}").unwrap();
     dot
 }
 
-/// Generate DOT representation for a DPO (Double Pushout) rewriting step
-/// Shows: L ← K → R (rule) applied to G, producing H via complement D
-pub fn dpo_to_dot(
-    l: &BHyp,           // Left-hand side of rule
-    k: &BHyp,           // Interface (preserved part)
-    r: &BHyp,           // Right-hand side of rule
-    g: &BHyp,           // Host graph
-    dpo_result: &DPOResult,
-    config: &DotConfig,
-) -> String {
-    let mut dot = String::new();
+// ============================================================================
+// Convenience Functions
+// ============================================================================
 
-    writeln!(dot, "digraph DPO {{").unwrap();
-    writeln!(dot, "  fontname=\"{}\"", config.font_name).unwrap();
-    writeln!(dot, "  fontsize={}", config.font_size).unwrap();
-    writeln!(dot, "  compound=true;").unwrap();
-    writeln!(dot, "  newrank=true;").unwrap();
-    writeln!(dot, "  label=\"Double Pushout Rewriting\";").unwrap();
-    writeln!(dot, "  labelloc=t;").unwrap();
-    writeln!(dot).unwrap();
-
-    // Layout: 3 columns x 2 rows
-    // Row 1: L, K, R (the rule)
-    // Row 2: G, D, H (the rewriting)
-
-    // Top row: Rule span L ← K → R
-    writeln!(dot, "  // Rule: L ← K → R").unwrap();
-    writeln!(dot, "  subgraph rule_row {{").unwrap();
-    writeln!(dot, "    rank=same;").unwrap();
-    dot.push_str(&bhyp_to_subgraph(l, "L", "L (LHS)", "lightblue", "l", config));
-    dot.push_str(&bhyp_to_subgraph(k, "K", "K (interface)", "lightgreen", "k", config));
-    dot.push_str(&bhyp_to_subgraph(r, "R", "R (RHS)", "lightcyan", "r", config));
-    writeln!(dot, "  }}").unwrap();
-    writeln!(dot).unwrap();
-
-    // Bottom row: Rewriting G → D → H
-    writeln!(dot, "  // Rewriting: G, D, H").unwrap();
-    writeln!(dot, "  subgraph rewrite_row {{").unwrap();
-    writeln!(dot, "    rank=same;").unwrap();
-    dot.push_str(&bhyp_to_subgraph(g, "G", "G (host)", "lightyellow", "g", config));
-    dot.push_str(&bhyp_to_subgraph(&dpo_result.complement, "D", "D (context)", "lightcoral", "d", config));
-    dot.push_str(&bhyp_to_subgraph(&dpo_result.result, "H", "H (result)", "plum", "h", config));
-    writeln!(dot, "  }}").unwrap();
-    writeln!(dot).unwrap();
-
-    // Morphism arrows
-    writeln!(dot, "  // Rule morphisms").unwrap();
-
-    // K → L (l: left inclusion)
-    writeln!(
-        dot,
-        "  k_anchor -> l_anchor [ltail=cluster_K, lhead=cluster_L, label=\"l\", style=bold, penwidth=2, dir=back];",
-    ).unwrap();
-
-    // K → R (r: right inclusion)
-    writeln!(
-        dot,
-        "  k_anchor -> r_anchor [ltail=cluster_K, lhead=cluster_R, label=\"r\", style=bold, penwidth=2];",
-    ).unwrap();
-
-    writeln!(dot, "  // Vertical morphisms (pushout squares)").unwrap();
-
-    // L → G (match)
-    writeln!(
-        dot,
-        "  l_anchor -> g_anchor [ltail=cluster_L, lhead=cluster_G, label=\"m\", style=bold, penwidth=2, color=blue];",
-    ).unwrap();
-
-    // K → D
-    writeln!(
-        dot,
-        "  k_anchor -> d_anchor [ltail=cluster_K, lhead=cluster_D, label=\"d\", style=bold, penwidth=2, color=green];",
-    ).unwrap();
-
-    // R → H
-    writeln!(
-        dot,
-        "  r_anchor -> h_anchor [ltail=cluster_R, lhead=cluster_H, label=\"n\", style=bold, penwidth=2, color=purple];",
-    ).unwrap();
-
-    writeln!(dot, "  // Bottom row morphisms").unwrap();
-
-    // G ← D (derived from pushout complement)
-    writeln!(
-        dot,
-        "  d_anchor -> g_anchor [ltail=cluster_D, lhead=cluster_G, label=\"\", style=bold, penwidth=2, dir=back];",
-    ).unwrap();
-
-    // D → H (pushout)
-    writeln!(
-        dot,
-        "  d_anchor -> h_anchor [ltail=cluster_D, lhead=cluster_H, label=\"\", style=bold, penwidth=2];",
-    ).unwrap();
-
-    // Pushout indicators
-    writeln!(dot).unwrap();
-    writeln!(dot, "  // Pushout symbols").unwrap();
-    writeln!(dot, "  po1 [label=\"PO\", shape=none, fontsize=10, fontcolor=gray];").unwrap();
-    writeln!(dot, "  po2 [label=\"PO\", shape=none, fontsize=10, fontcolor=gray];").unwrap();
-
-    writeln!(dot, "}}").unwrap();
-    dot
+/// Convenience function to generate labelled DOT
+pub fn bhyp_to_dot_labelled(bhyp: &BHyp) -> String {
+    bhyp_to_dot(bhyp, &DotConfig::default())
 }
 
-/// Generate a simplified DPO diagram showing just boxes with statistics
-pub fn dpo_cospan_to_dot(
-    l: &BHyp,
-    k: &BHyp,
-    r: &BHyp,
-    g: &BHyp,
-    result: &BHyp,
-) -> String {
-    let mut dot = String::new();
-
-    writeln!(dot, "digraph DPOCospan {{").unwrap();
-    writeln!(dot, "  rankdir=TB;").unwrap();
-    writeln!(dot, "  node [shape=box, style=filled, fontname=Helvetica];").unwrap();
-    writeln!(dot, "  edge [fontname=Helvetica];").unwrap();
-    writeln!(dot).unwrap();
-
-    // Top row: Rule
-    writeln!(dot, "  subgraph rule {{").unwrap();
-    writeln!(dot, "    rank=same;").unwrap();
-    writeln!(
-        dot,
-        "    L [label=\"L (LHS)\\n{} nodes, {} edges\", fillcolor=lightblue];",
-        l.nodes().len(), l.edges().len()
-    ).unwrap();
-    writeln!(
-        dot,
-        "    K [label=\"K (interface)\\n{} nodes\", fillcolor=lightgreen];",
-        k.nodes().len()
-    ).unwrap();
-    writeln!(
-        dot,
-        "    R [label=\"R (RHS)\\n{} nodes, {} edges\", fillcolor=lightcyan];",
-        r.nodes().len(), r.edges().len()
-    ).unwrap();
-    writeln!(dot, "  }}").unwrap();
-    writeln!(dot).unwrap();
-
-    // Bottom row: Rewriting
-    writeln!(dot, "  subgraph rewrite {{").unwrap();
-    writeln!(dot, "    rank=same;").unwrap();
-    writeln!(
-        dot,
-        "    G [label=\"G (host)\\n{} nodes, {} edges\", fillcolor=lightyellow];",
-        g.nodes().len(), g.edges().len()
-    ).unwrap();
-    writeln!(dot, "    D [label=\"D (context)\", fillcolor=lightcoral];").unwrap();
-    writeln!(
-        dot,
-        "    H [label=\"H (result)\\n{} nodes, {} edges\", fillcolor=plum];",
-        result.nodes().len(), result.edges().len()
-    ).unwrap();
-    writeln!(dot, "  }}").unwrap();
-    writeln!(dot).unwrap();
-
-    // Rule span
-    writeln!(dot, "  K -> L [label=\"l\", dir=back];").unwrap();
-    writeln!(dot, "  K -> R [label=\"r\"];").unwrap();
-
-    // Vertical morphisms
-    writeln!(dot, "  L -> G [label=\"match\", style=dashed];").unwrap();
-    writeln!(dot, "  K -> D [style=dashed];").unwrap();
-    writeln!(dot, "  R -> H [style=dashed];").unwrap();
-
-    // Bottom span
-    writeln!(dot, "  D -> G [dir=back];").unwrap();
-    writeln!(dot, "  D -> H;").unwrap();
-
-    writeln!(dot, "}}").unwrap();
-    dot
+/// Convenience function to generate unlabelled DOT
+pub fn bhyp_to_dot_unlabelled(bhyp: &BHyp) -> String {
+    bhyp_to_dot(bhyp, &DotConfig::unlabelled())
 }
 
-// Convenience functions
+/// Convenience function for BHyp_with_interface labelled
+pub fn bhyp_with_interface_to_dot_labelled(bhyp_i: &BHyp_with_interface) -> String {
+    bhyp_with_interface_to_dot(bhyp_i, &DotConfig::default())
+}
+
+/// Convenience function for BHyp_with_interface unlabelled
+pub fn bhyp_with_interface_to_dot_unlabelled(bhyp_i: &BHyp_with_interface) -> String {
+    bhyp_with_interface_to_dot(bhyp_i, &DotConfig::unlabelled())
+}
 
 /// Convenience function to generate morphism DOT with default config
 pub fn morphism_to_dot_labelled(morphism: &BHypMorphism) -> String {
@@ -1079,234 +1017,215 @@ pub fn morphism_to_dot_labelled(morphism: &BHypMorphism) -> String {
 
 /// Convenience function to generate pushout DOT with default config
 pub fn pushout_to_dot_labelled(
-    c: &BHyp,
-    a: &BHyp,
-    b: &BHyp,
-    pushout_result: &PushoutResult,
+    f: &BHypMorphism,
+    g: &BHypMorphism,
+    result: &PushoutResult,
 ) -> String {
-    pushout_to_dot(c, a, b, pushout_result, &DotConfig::default())
+    pushout_to_dot(f, g, result, &DotConfig::default())
 }
 
 /// Convenience function to generate pullback DOT with default config
 pub fn pullback_to_dot_labelled(
-    c: &BHyp,
-    a: &BHyp,
-    b: &BHyp,
-    pullback: &BHyp,
-    morphism_p_to_a: &BHypMorphism,
-    morphism_p_to_b: &BHypMorphism,
+    f: &BHypMorphism,
+    g: &BHypMorphism,
+    result: &PullbackResult,
 ) -> String {
-    pullback_to_dot(c, a, b, pullback, morphism_p_to_a, morphism_p_to_b, &DotConfig::default())
+    pullback_to_dot(f, g, result, &DotConfig::default())
 }
 
 /// Convenience function to generate pushout complement DOT with default config
 pub fn pushout_complement_to_dot_labelled(
-    l: &BHyp,
-    k: &BHyp,
-    g: &BHyp,
-    d: &BHyp,
-    morphism_k_to_l: &BHypMorphism,
-    morphism_k_to_d: &BHypMorphism,
-    morphism_l_to_g: &BHypMorphism,
-    morphism_d_to_g: &BHypMorphism,
+    l: &BHypMorphism,
+    m: &BHypMorphism,
+    result: &PushoutComplementResult,
 ) -> String {
-    pushout_complement_to_dot(
-        l, k, g, d,
-        morphism_k_to_l, morphism_k_to_d,
-        morphism_l_to_g, morphism_d_to_g,
-        &DotConfig::default(),
-    )
+    pushout_complement_to_dot(l, m, result, &DotConfig::default())
 }
 
-/// Convenience function to generate DPO DOT with default config
-pub fn dpo_to_dot_labelled(
-    l: &BHyp,
-    k: &BHyp,
-    r: &BHyp,
-    g: &BHyp,
-    dpo_result: &DPOResult,
-) -> String {
-    dpo_to_dot(l, k, r, g, dpo_result, &DotConfig::default())
-}
-fn format_label(label: &Label) -> String {
-    match label {
-        Label::Symbol(s) => s.clone(),
-        Label::Meta(name, arity) => format!("{}:{}", name, arity),
+// ============================================================================
+// Tests
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bhyp::SourceWithBinding;
+    use crate::categorical::{identity_morphism, compute_pushout, compute_pullback, compute_pushout_complement};
+    use std::collections::HashMap;
+
+    fn create_simple_graph() -> BHyp {
+        let mut g = BHyp::new();
+        let n1 = g.add_node();
+        let n2 = g.add_node();
+        g.add_edge(
+            vec![SourceWithBinding { source: n1, bound: vec![] }],
+            vec![n2],
+            Some(Label::Symbol("f".to_string())),
+        ).unwrap();
+        g
+    }
+
+    #[test]
+    fn test_simple_bhyp_dot() {
+        let g = create_simple_graph();
+        let dot = bhyp_to_dot_labelled(&g);
+        assert!(dot.contains("digraph"));
+        assert!(dot.contains("n0"));
+        assert!(dot.contains("n1"));
+        assert!(dot.contains("e0"));
+        assert!(dot.contains("\"f\""));
+    }
+
+    #[test]
+    fn test_morphism_dot() {
+        let g = create_simple_graph();
+        let id = identity_morphism(&g);
+        let dot = morphism_to_dot_labelled(&id);
+        
+        assert!(dot.contains("digraph Morphism"));
+        assert!(dot.contains("cluster_domain"));
+        assert!(dot.contains("cluster_codomain"));
+        assert!(dot.contains("dom_n"));
+        assert!(dot.contains("cod_n"));
+    }
+
+    #[test]
+    fn test_pushout_dot() {
+        // Create a span A <- K -> B
+        let mut k = BHyp::new();
+        let k_node = k.add_node();
+
+        let mut a = BHyp::new();
+        let a_node = a.add_node();
+        let _a_node2 = a.add_node();
+
+        let mut b = BHyp::new();
+        let b_node = b.add_node();
+        let _b_node2 = b.add_node();
+
+        let f = BHypMorphism::new(
+            k.clone(),
+            a,
+            [(k_node, a_node)].into_iter().collect(),
+            HashMap::new(),
+        ).unwrap();
+
+        let g = BHypMorphism::new(
+            k,
+            b,
+            [(k_node, b_node)].into_iter().collect(),
+            HashMap::new(),
+        ).unwrap();
+
+        let result = compute_pushout(&f, &g).unwrap();
+        let dot = pushout_to_dot_labelled(&f, &g, &result);
+
+        assert!(dot.contains("digraph CategoricalSquare"));
+        assert!(dot.contains("cluster_A"));
+        assert!(dot.contains("cluster_B"));
+        assert!(dot.contains("cluster_C"));
+        assert!(dot.contains("cluster_D"));
+        assert!(dot.contains("PO"));
+    }
+
+    #[test]
+    fn test_pullback_dot() {
+        // Create a cospan B -> D <- C
+        let mut d = BHyp::new();
+        let d_node = d.add_node();
+
+        let mut b = BHyp::new();
+        let b_node = b.add_node();
+
+        let mut c = BHyp::new();
+        let c_node = c.add_node();
+
+        let f = BHypMorphism::new(
+            b,
+            d.clone(),
+            [(b_node, d_node)].into_iter().collect(),
+            HashMap::new(),
+        ).unwrap();
+
+        let g = BHypMorphism::new(
+            c,
+            d,
+            [(c_node, d_node)].into_iter().collect(),
+            HashMap::new(),
+        ).unwrap();
+
+        let result = compute_pullback(&f, &g).unwrap();
+        let dot = pullback_to_dot_labelled(&f, &g, &result);
+
+        assert!(dot.contains("digraph CategoricalSquare"));
+        assert!(dot.contains("cluster_P"));
+        assert!(dot.contains("cluster_B"));
+        assert!(dot.contains("cluster_C"));
+        assert!(dot.contains("cluster_D"));
+        assert!(dot.contains("PB"));
+    }
+
+    #[test]
+    fn test_pushout_complement_dot() {
+        // K -> L -> G
+        let mut k = BHyp::new();
+        let k_node = k.add_node();
+
+        let mut l = BHyp::new();
+        let l_node = l.add_node();
+
+        let mut g = BHyp::new();
+        let g_node1 = g.add_node();
+        let _g_node2 = g.add_node();
+
+        let l_morph = BHypMorphism::new(
+            k,
+            l.clone(),
+            [(k_node, l_node)].into_iter().collect(),
+            HashMap::new(),
+        ).unwrap();
+
+        let m_morph = BHypMorphism::new(
+            l,
+            g,
+            [(l_node, g_node1)].into_iter().collect(),
+            HashMap::new(),
+        ).unwrap();
+
+        let result = compute_pushout_complement(&l_morph, &m_morph).unwrap();
+        let dot = pushout_complement_to_dot_labelled(&l_morph, &m_morph, &result);
+
+        assert!(dot.contains("digraph CategoricalSquare"));
+        assert!(dot.contains("cluster_K"));
+        assert!(dot.contains("cluster_L"));
+        assert!(dot.contains("cluster_C"));
+        assert!(dot.contains("cluster_G"));
+        assert!(dot.contains("PO"));
+    }
+
+    #[test]
+    fn test_config_without_detailed_mappings() {
+        let g = create_simple_graph();
+        let id = identity_morphism(&g);
+        
+        let config = DotConfig::without_detailed_mappings();
+        let dot = morphism_to_dot(&id, &config);
+        
+        // Should not contain dotted mapping arrows
+        assert!(!dot.contains("style=dotted"));
+    }
+
+    #[test]
+    fn test_bhyp_to_subgraph_reusability() {
+        let g = create_simple_graph();
+        
+        // Test that bhyp_to_subgraph produces valid DOT content
+        let subgraph = bhyp_to_subgraph(&g, "test", "Test Graph", "lightblue", "t", &DotConfig::default());
+        
+        assert!(subgraph.contains("subgraph cluster_test"));
+        assert!(subgraph.contains("t_n0"));
+        assert!(subgraph.contains("t_n1"));
+        assert!(subgraph.contains("t_e0"));
+        assert!(subgraph.contains("t_anchor"));
     }
 }
-
-// #[cfg(test)]
-// mod dot_tests {
-//     use super::*;
-
-//     #[test]
-//     fn test_simple_bhyp_dot() {
-//         let mut g = BHyp::new();
-//         let n1 = g.add_node();
-//         let n2 = g.add_node();
-//         g.add_edge(
-//             vec![SourceWithBinding { source: n1, bound: vec![] }],
-//             vec![n2],
-//             Some(Label::Symbol("f".to_string())),
-//         ).unwrap();
-
-//         let dot = bhyp_to_dot_labelled(&g);
-//         assert!(dot.contains("digraph"));
-//         assert!(dot.contains("n0"));
-//         assert!(dot.contains("n1"));
-//         assert!(dot.contains("e0"));
-//         assert!(dot.contains("\"f\""));
-//         println!("{}", dot);
-//     }
-
-//     #[test]
-//     fn test_lambda_binding_dot() {
-//         let mut g = BHyp::new();
-//         let x = g.add_node();      // bound variable
-//         let f_out = g.add_node();  // output of f(x)
-//         let lambda_out = g.add_node(); // output
-
-//         // f(x)
-//         g.add_edge(
-//             vec![SourceWithBinding { source: x, bound: vec![] }],
-//             vec![f_out],
-//             Some(Label::Symbol("f".to_string())),
-//         ).unwrap();
-
-//         // λx binds x
-//         g.add_edge(
-//             vec![SourceWithBinding { source: f_out, bound: vec![x] }],
-//             vec![lambda_out],
-//             Some(Label::Symbol("λ".to_string())),
-//         ).unwrap();
-
-//         let dot = bhyp_to_dot_labelled(&g);
-//         assert!(dot.contains("style=dashed")); // binding connection
-//         assert!(dot.contains("\"λ\""));
-//         println!("{}", dot);
-//     }
-
-//     #[test]
-//     fn test_metaedge_dot() {
-//         let mut g = BHyp::new();
-//         let n1 = g.add_node();
-//         let n2 = g.add_node();
-//         g.add_edge(
-//             vec![SourceWithBinding { source: n1, bound: vec![] }],
-//             vec![n2],
-//             Some(Label::Meta("M".to_string(), 1)),
-//         ).unwrap();
-
-//         let dot = bhyp_to_dot_labelled(&g);
-//         assert!(dot.contains("ellipse")); // metaedges are ellipses
-//         assert!(dot.contains("M:1"));
-//         println!("{}", dot);
-//     }
-
-//     #[test]
-//     fn test_bhyp_with_interface_dot() {
-//         let mut g = BHyp_with_interface::new();
-//         let n1 = g.add_node();
-//         let n2 = g.add_node();
-//         g.add_edge(
-//             vec![SourceWithBinding { source: n1, bound: vec![] }],
-//             vec![n2],
-//             Some(Label::Symbol("f".to_string())),
-//         ).unwrap();
-
-//         let dot = bhyp_with_interface_to_dot_labelled(&g);
-//         assert!(dot.contains("cluster_input"));
-//         assert!(dot.contains("cluster_main"));
-//         assert!(dot.contains("cluster_output"));
-//         assert!(dot.contains("I_G"));
-//         assert!(dot.contains("O_G"));
-//         println!("{}", dot);
-//     }
-
-//     #[test]
-//     fn test_cospan_diagram() {
-//         let mut g = BHyp_with_interface::new();
-//         let n1 = g.add_node();
-//         let n2 = g.add_node();
-//         g.add_edge(
-//             vec![SourceWithBinding { source: n1, bound: vec![] }],
-//             vec![n2],
-//             None,
-//         ).unwrap();
-
-//         let dot = bhyp_with_interface_cospan_to_dot(&g, &DotConfig::default());
-//         assert!(dot.contains("I_G"));
-//         assert!(dot.contains("O_G"));
-//         assert!(dot.contains("->"));
-//         println!("{}", dot);
-//     }
-
-//     #[test]
-//     fn test_discrete_bhyp_dot() {
-//         let mut g = BHyp::new();
-//         g.add_nodes(3);
-
-//         let dot = discrete_bhyp_to_dot(&g, "Discrete", &DotConfig::with_node_ids());
-//         assert!(dot.contains("discrete"));
-//         assert!(dot.contains("3 nodes"));
-//         println!("{}", dot);
-//     }
-
-//     #[test]
-//     fn test_unlabelled_dot() {
-//         let mut g = BHyp::new();
-//         let n1 = g.add_node();
-//         let n2 = g.add_node();
-//         g.add_edge(
-//             vec![SourceWithBinding { source: n1, bound: vec![] }],
-//             vec![n2],
-//             Some(Label::Symbol("should_not_appear".to_string())),
-//         ).unwrap();
-
-//         let dot = bhyp_to_dot_unlabelled(&g);
-//         assert!(!dot.contains("should_not_appear"));
-//         println!("{}", dot);
-//     }
-
-//     #[test]
-//     fn test_example_3_2_from_paper() {
-//         // Example 3.2 from the paper: 3 edges, 5 vertices
-//         // t(1)={b}, t(2)={d}, t(3)={e}
-//         // s(1)={a}, s(2)=∅, s(3)={c}
-//         // b(1)={∅}, b(2)=∅, b(3)={{a}}
-        
-//         let mut g = BHyp::new();
-//         let a = g.add_node(); // 0
-//         let b = g.add_node(); // 1
-//         let c = g.add_node(); // 2
-//         let d = g.add_node(); // 3
-//         let e = g.add_node(); // 4
-
-//         // Edge 1: s={a}, t={b}, b={∅}
-//         g.add_edge(
-//             vec![SourceWithBinding { source: a, bound: vec![] }],
-//             vec![b],
-//             Some(Label::Symbol("1".to_string())),
-//         ).unwrap();
-
-//         // Edge 2: s=∅, t={d}, b=∅
-//         g.add_edge(
-//             vec![],
-//             vec![d],
-//             Some(Label::Symbol("2".to_string())),
-//         ).unwrap();
-
-//         // Edge 3: s={c}, t={e}, b={{a}} - a is bound at source c
-//         g.add_edge(
-//             vec![SourceWithBinding { source: c, bound: vec![a] }],
-//             vec![e],
-//             Some(Label::Symbol("3".to_string())),
-//         ).unwrap();
-
-//         let dot = bhyp_to_dot(&g, &DotConfig::with_node_ids());
-//         println!("Example 3.2 from paper:\n{}", dot);
-        
-//         // The binding from edge 3 to node a should appear as dashed
-//         assert!(dot.contains("style=dashed"));
-//     }
-// }
