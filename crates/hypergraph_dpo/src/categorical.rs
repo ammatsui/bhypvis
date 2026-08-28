@@ -336,6 +336,35 @@ pub fn identity_morphism(bhyp: &BHyp) -> BHypMorphism {
 }
 
 
+/// Span and CoSpan structs
+#[derive(Debug, Clone)]
+pub struct Span {
+    /// left-hand side
+    pub left: BHyp,
+    /// middle
+    pub middle: BHyp,
+    /// right-hand side 
+    pub right: BHyp,
+    /// morphisms
+    pub to_l: BHypMorphism,
+    pub to_r: BHypMorphism
+}
+
+#[derive(Debug, Clone)]
+pub struct CoSpan {
+    /// left-hand side
+    pub left: BHyp,
+    /// middle
+    pub middle: BHyp,
+    /// right-hand side 
+    pub right: BHyp,
+    /// morphisms
+    pub from_l: BHypMorphism,
+    pub from_r: BHypMorphism
+}
+
+
+
 // ============================================================================
 // Pushout and Pushout Complement
 // ============================================================================
@@ -991,6 +1020,26 @@ pub fn compute_pushout_complement(
         morphism_to_g: c_to_g,
     })
 }
+
+
+/// double-pushout diagram
+pub fn dpo(span: &Span, g: &BHyp, m: &BHypMorphism) -> 
+    Result<Span, CategoricalError> {
+    let pc = compute_pushout_complement(&span.to_l, m).unwrap();
+    
+    let result = compute_pushout(&span.to_r, &pc.morphism_from_k).unwrap();
+    
+    Ok(Span {
+        left : g.clone(),
+        middle : pc.complement.clone(),
+        right: result.pushout.clone(),
+        to_l: pc.morphism_to_g.clone(),
+        to_r: result.morphism_from_c.clone()
+    })
+
+}
+
+
 
 
 /// Check if two BHyp instances are isomorphic
@@ -2102,224 +2151,777 @@ mod tests {
         assert!(pb_result.pullback.nodes().len() >= k.nodes().len());
     }
 
+
+    /// Create an identity span: L <- L -> L (all morphisms are identity)
+    fn identity_span(g: &BHyp) -> Span {
+        let id_l = identity_morphism(g);
+        let id_r = identity_morphism(g);
+        Span {
+            left: g.clone(),
+            middle: g.clone(),
+            right: g.clone(),
+            to_l: id_l,
+            to_r: id_r,
+        }
+    }
+
+    /// Create a span where L = R but middle is different (smaller interface)
+    fn equal_lr_span(
+        left_right: &BHyp,
+        middle: &BHyp,
+        to_l_nodes: HashMap<NodeId, NodeId>,
+        to_l_edges: HashMap<EdgeId, EdgeId>,
+        to_r_nodes: HashMap<NodeId, NodeId>,
+        to_r_edges: HashMap<EdgeId, EdgeId>,
+    ) -> Result<Span, MorphismError> {
+        let to_l = BHypMorphism::new(
+            middle.clone(),
+            left_right.clone(),
+            to_l_nodes,
+            to_l_edges,
+        )?;
+        let to_r = BHypMorphism::new(
+            middle.clone(),
+            left_right.clone(),
+            to_r_nodes,
+            to_r_edges,
+        )?;
+        Ok(Span {
+            left: left_right.clone(),
+            middle: middle.clone(),
+            right: left_right.clone(),
+            to_l,
+            to_r,
+        })
+    }
+
+    // ========================================================================
+    // Identity Span Tests
+    // ========================================================================
+
     #[test]
-    fn test_dpo_rewrite_step() {
-        // Simulate a Double Pushout rewriting step
-        // Rule: f(x) -> g(x)
-        // This removes f and adds g
+    fn test_dpo_identity_span_produces_identity_result() {
+        // DPO with identity span L <- L -> L should produce identity result span
+        // G <- G -> G (nothing changes)
 
-        // K: interface - just the variable x and output
-        let mut k = BHyp::new();
-        let k_x = k.add_node();
-        let k_out = k.add_node();
-
-        // L: left-hand side - f(x)
-        let mut l = BHyp::new();
-        let l_x = l.add_node();
-        let l_out = l.add_node();
-        let l_f = l
-            .add_edge(
-                vec![SourceWithBinding {
-                    source: l_x,
-                    bound: vec![],
-                }],
-                vec![l_out],
-                Some(Label::Symbol("f".to_string())),
-            )
-            .unwrap();
-
-        // R: right-hand side - g(x)
-        let mut r = BHyp::new();
-        let r_x = r.add_node();
-        let r_out = r.add_node();
-        r.add_edge(
+        let mut g = BHyp::new();
+        let g1 = g.add_node();
+        let g2 = g.add_node();
+        g.add_edge(
             vec![SourceWithBinding {
-                source: r_x,
+                source: g1,
                 bound: vec![],
             }],
-            vec![r_out],
-            Some(Label::Symbol("g".to_string())),
+            vec![g2],
+            Some(Label::Symbol("f".to_string())),
         )
         .unwrap();
 
-        // l: K -> L
-        let l_morph = BHypMorphism::new(
+        let span = identity_span(&g);
+        let m = identity_morphism(&g); // Match L -> G is identity
+
+        let result = dpo(&span, &g, &m).unwrap();
+
+        // Result should be isomorphic to identity span on G
+        assert!(are_isomorphic(&result.left, &g));
+        assert!(are_isomorphic(&result.middle, &g));
+        assert!(are_isomorphic(&result.right, &g));
+        
+        // The morphisms should be isomorphisms
+        assert!(result.to_l.is_isomorphism());
+        assert!(result.to_r.is_isomorphism());
+    }
+
+    #[test]
+    fn test_dpo_identity_span_on_empty_graph() {
+        let g = BHyp::new();
+        let span = identity_span(&g);
+        let m = identity_morphism(&g);
+
+        let result = dpo(&span, &g, &m).unwrap();
+
+        assert!(result.left.is_empty());
+        assert!(result.middle.is_empty());
+        assert!(result.right.is_empty());
+    }
+
+    #[test]
+    fn test_dpo_identity_span_with_binding() {
+        // Test identity span preserves binding structure
+        let mut g = BHyp::new();
+        let x = g.add_node();
+        let body = g.add_node();
+        let out = g.add_node();
+        g.add_edge(
+            vec![SourceWithBinding {
+                source: body,
+                bound: vec![x],
+            }],
+            vec![out],
+            Some(Label::Symbol("λ".to_string())),
+        )
+        .unwrap();
+
+        let span = identity_span(&g);
+        let m = identity_morphism(&g);
+
+        let result = dpo(&span, &g, &m).unwrap();
+
+        // Check binding structure preserved
+        assert_eq!(result.right.nodes().len(), 3);
+        assert_eq!(result.right.edges().len(), 1);
+        
+        let e = *result.right.edges().iter().next().unwrap();
+        let swbs = result.right.get_sources_with_binding(e).unwrap();
+        assert_eq!(swbs[0].bound.len(), 1);
+    }
+
+    // ========================================================================
+    // Equal L=R (Different Middle) Tests
+    // ========================================================================
+
+    #[test]
+    fn test_dpo_equal_lr_different_middle_preserves_equality() {
+        // Span: L <- K -> R where L = R (isomorphic) but K is smaller
+        // Result should also have L' = R' (isomorphic)
+
+        // L = R: two nodes with edge
+        let mut lr = BHyp::new();
+        let lr1 = lr.add_node();
+        let lr2 = lr.add_node();
+        lr.add_edge(
+            vec![SourceWithBinding {
+                source: lr1,
+                bound: vec![],
+            }],
+            vec![lr2],
+            Some(Label::Symbol("f".to_string())),
+        )
+        .unwrap();
+
+        // K: just one node (the interface)
+        let mut k = BHyp::new();
+        let k1 = k.add_node();
+
+        // Both to_l and to_r map k1 to lr1
+        let span = equal_lr_span(
+            &lr,
+            &k,
+            [(k1, lr1)].into_iter().collect(),
+            HashMap::new(),
+            [(k1, lr1)].into_iter().collect(),
+            HashMap::new(),
+        )
+        .unwrap();
+
+        // G = L (identity match)
+        let g = lr.clone();
+        let g1 = *g.nodes().iter().min().unwrap();
+        let g2 = *g.nodes().iter().max().unwrap();
+        let g_e = *g.edges().iter().next().unwrap();
+
+        let m = BHypMorphism::new(
+            lr.clone(),
+            g.clone(),
+            [(lr1, g1), (lr2, g2)].into_iter().collect(),
+            [(EdgeId(0), g_e)].into_iter().collect(),
+        )
+        .unwrap();
+
+        let result = dpo(&span, &g, &m).unwrap();
+
+        // L' and R' should be isomorphic to each other
+        assert!(are_isomorphic(&result.left, &result.right));
+    }
+
+    #[test]
+    fn test_dpo_equal_lr_with_context() {
+        // L = R with different middle, applied to G with extra context
+        // Result L' = R' should still hold
+
+        // L = R: single node
+        let mut lr = BHyp::new();
+        let lr1 = lr.add_node();
+
+        // K: same single node
+        let mut k = BHyp::new();
+        let k1 = k.add_node();
+
+        let span = equal_lr_span(
+            &lr,
+            &k,
+            [(k1, lr1)].into_iter().collect(),
+            HashMap::new(),
+            [(k1, lr1)].into_iter().collect(),
+            HashMap::new(),
+        )
+        .unwrap();
+
+        // G: the matched node plus extra context
+        let mut g = BHyp::new();
+        let g1 = g.add_node();
+        let g2 = g.add_node();
+        let g3 = g.add_node();
+        g.add_edge(
+            vec![SourceWithBinding {
+                source: g1,
+                bound: vec![],
+            }],
+            vec![g2],
+            Some(Label::Symbol("context1".to_string())),
+        )
+        .unwrap();
+        g.add_edge(
+            vec![SourceWithBinding {
+                source: g1,
+                bound: vec![],
+            }],
+            vec![g3],
+            Some(Label::Symbol("context2".to_string())),
+        )
+        .unwrap();
+
+        let m = BHypMorphism::new(
+            lr.clone(),
+            g.clone(),
+            [(lr1, g1)].into_iter().collect(),
+            HashMap::new(),
+        )
+        .unwrap();
+
+        let result = dpo(&span, &g, &m).unwrap();
+
+        // Since L = R and they share the same interface to K,
+        // the result should have L' isomorphic to R'
+        assert!(are_isomorphic(&result.left, &result.right));
+        
+        // Context should be preserved
+        assert_eq!(result.right.nodes().len(), 3);
+        assert_eq!(result.right.edges().len(), 2);
+    }
+
+    // ========================================================================
+    // Symmetric Span Tests  
+    // ========================================================================
+
+    #[test]
+    fn test_dpo_symmetric_span() {
+        // If the span is symmetric (to_l and to_r are "the same"), 
+        // result should also be symmetric
+
+        let mut k = BHyp::new();
+        let k1 = k.add_node();
+        let k2 = k.add_node();
+
+        let mut l = BHyp::new();
+        let l1 = l.add_node();
+        let l2 = l.add_node();
+        l.add_edge(
+            vec![SourceWithBinding {
+                source: l1,
+                bound: vec![],
+            }],
+            vec![l2],
+            Some(Label::Symbol("f".to_string())),
+        )
+        .unwrap();
+
+        // Symmetric: R is isomorphic to L
+        let mut r = BHyp::new();
+        let r1 = r.add_node();
+        let r2 = r.add_node();
+        r.add_edge(
+            vec![SourceWithBinding {
+                source: r1,
+                bound: vec![],
+            }],
+            vec![r2],
+            Some(Label::Symbol("f".to_string())),
+        )
+        .unwrap();
+
+        let to_l = BHypMorphism::new(
             k.clone(),
             l.clone(),
-            [(k_x, l_x), (k_out, l_out)].into_iter().collect(),
+            [(k1, l1), (k2, l2)].into_iter().collect(),
             HashMap::new(),
         )
         .unwrap();
 
-        // r: K -> R
-        let r_morph = BHypMorphism::new(
+        let to_r = BHypMorphism::new(
             k.clone(),
             r.clone(),
-            [(k_x, r_x), (k_out, r_out)].into_iter().collect(),
+            [(k1, r1), (k2, r2)].into_iter().collect(),
             HashMap::new(),
         )
         .unwrap();
 
-        // G: the host graph - just f(a) for some a
-        let mut g = BHyp::new();
-        let g_a = g.add_node();
-        let g_out = g.add_node();
-        let g_f = g
+        let span = Span {
+            left: l.clone(),
+            middle: k,
+            right: r,
+            to_l,
+            to_r,
+        };
+
+        let g = l.clone();
+        let m = identity_morphism(&l);
+
+        let result = dpo(&span, &g, &m).unwrap();
+
+        // Result L' and R' should be isomorphic (symmetric rewrite)
+        assert!(are_isomorphic(&result.left, &result.right));
+    }
+
+    // ========================================================================
+    // Deletion/Addition Preservation Tests
+    // ========================================================================
+
+    #[test]
+    fn test_dpo_deletion_in_span_causes_deletion_in_result() {
+        // L has more than K (deletion), R = K (no addition)
+        // Result: items deleted from G
+
+        let mut k = BHyp::new();
+        let k1 = k.add_node();
+
+        let mut l = BHyp::new();
+        let l1 = l.add_node();
+        let l2 = l.add_node();
+        let l_e = l
             .add_edge(
                 vec![SourceWithBinding {
-                    source: g_a,
+                    source: l1,
                     bound: vec![],
                 }],
-                vec![g_out],
-                Some(Label::Symbol("f".to_string())),
+                vec![l2],
+                Some(Label::Symbol("delete_me".to_string())),
             )
             .unwrap();
 
-        // m: L -> G (the match)
+        // R = K (just one node, no edge)
+        let mut r = BHyp::new();
+        let r1 = r.add_node();
+
+        let to_l = BHypMorphism::new(
+            k.clone(),
+            l.clone(),
+            [(k1, l1)].into_iter().collect(),
+            HashMap::new(),
+        )
+        .unwrap();
+
+        let to_r = BHypMorphism::new(
+            k.clone(),
+            r.clone(),
+            [(k1, r1)].into_iter().collect(),
+            HashMap::new(),
+        )
+        .unwrap();
+
+        let span = Span {
+            left: l.clone(),
+            middle: k,
+            right: r,
+            to_l,
+            to_r,
+        };
+
+        // G = L
+        let g = l.clone();
+        let m = identity_morphism(&l);
+
+        let result = dpo(&span, &g, &m).unwrap();
+
+        // Result right should have 1 node, 0 edges (deletion happened)
+        assert_eq!(result.right.nodes().len(), 1);
+        assert_eq!(result.right.edges().len(), 0);
+    }
+
+    #[test]
+    fn test_dpo_addition_in_span_causes_addition_in_result() {
+        // L = K (no deletion), R has more than K (addition)
+
+        let mut k = BHyp::new();
+        let k1 = k.add_node();
+
+        // L = K
+        let mut l = BHyp::new();
+        let l1 = l.add_node();
+
+        let mut r = BHyp::new();
+        let r1 = r.add_node();
+        let r2 = r.add_node();
+        r.add_edge(
+            vec![SourceWithBinding {
+                source: r1,
+                bound: vec![],
+            }],
+            vec![r2],
+            Some(Label::Symbol("added".to_string())),
+        )
+        .unwrap();
+
+        let to_l = BHypMorphism::new(
+            k.clone(),
+            l.clone(),
+            [(k1, l1)].into_iter().collect(),
+            HashMap::new(),
+        )
+        .unwrap();
+
+        let to_r = BHypMorphism::new(
+            k.clone(),
+            r.clone(),
+            [(k1, r1)].into_iter().collect(),
+            HashMap::new(),
+        )
+        .unwrap();
+
+        let span = Span {
+            left: l.clone(),
+            middle: k,
+            right: r,
+            to_l,
+            to_r,
+        };
+
+        let g = l.clone();
+        let m = identity_morphism(&l);
+
+        let result = dpo(&span, &g, &m).unwrap();
+
+        // Result right should have 2 nodes, 1 edge (addition happened)
+        assert_eq!(result.right.nodes().len(), 2);
+        assert_eq!(result.right.edges().len(), 1);
+
+        let e = *result.right.edges().iter().next().unwrap();
+        assert_eq!(
+            result.right.get_label(e),
+            Some(&Label::Symbol("added".to_string()))
+        );
+    }
+
+    // ========================================================================
+    // Context Preservation Tests
+    // ========================================================================
+
+    #[test]
+    fn test_dpo_preserves_context_nodes() {
+        // Rewrite in G but context (unmatched parts) preserved
+
+        let mut k = BHyp::new();
+        let k1 = k.add_node();
+
+        let mut l = BHyp::new();
+        let l1 = l.add_node();
+
+        let mut r = BHyp::new();
+        let r1 = r.add_node();
+
+        let to_l = BHypMorphism::new(
+            k.clone(),
+            l.clone(),
+            [(k1, l1)].into_iter().collect(),
+            HashMap::new(),
+        )
+        .unwrap();
+
+        let to_r = BHypMorphism::new(
+            k.clone(),
+            r.clone(),
+            [(k1, r1)].into_iter().collect(),
+            HashMap::new(),
+        )
+        .unwrap();
+
+        let span = Span {
+            left: l.clone(),
+            middle: k,
+            right: r,
+            to_l,
+            to_r,
+        };
+
+        // G has matched node plus context
+        let mut g = BHyp::new();
+        let g1 = g.add_node();
+        let g_ctx1 = g.add_node();
+        let g_ctx2 = g.add_node();
+        g.add_edge(
+            vec![SourceWithBinding {
+                source: g_ctx1,
+                bound: vec![],
+            }],
+            vec![g_ctx2],
+            Some(Label::Symbol("context".to_string())),
+        )
+        .unwrap();
+
         let m = BHypMorphism::new(
             l.clone(),
             g.clone(),
-            [(l_x, g_a), (l_out, g_out)].into_iter().collect(),
-            [(l_f, g_f)].into_iter().collect(),
+            [(l1, g1)].into_iter().collect(),
+            HashMap::new(),
         )
         .unwrap();
 
-        // Step 1: Compute pushout complement C
-        let poc_result = compute_pushout_complement(&l_morph, &m).unwrap();
+        let result = dpo(&span, &g, &m).unwrap();
 
-        // C should have 2 nodes and 0 edges (f removed)
-        assert_eq!(poc_result.complement.nodes().len(), 2);
-        assert_eq!(poc_result.complement.edges().len(), 0);
+        // Context should be preserved in result
+        assert_eq!(result.right.nodes().len(), 3);
+        assert_eq!(result.right.edges().len(), 1);
 
-        // Step 2: Compute pushout of r_morph and k_to_c to get H
-        let po_result = compute_pushout(&r_morph, &poc_result.morphism_from_k).unwrap();
-
-        // H should have 2 nodes and 1 edge (g added)
-        assert_eq!(po_result.pushout.nodes().len(), 2);
-        assert_eq!(po_result.pushout.edges().len(), 1);
-
-        // Check that the edge is labeled g
-        let h_edges: Vec<_> = po_result.pushout.edges().iter().collect();
-        let h_e = *h_edges[0];
+        let e = *result.right.edges().iter().next().unwrap();
         assert_eq!(
-            po_result.pushout.get_label(h_e),
-            Some(&Label::Symbol("g".to_string()))
+            result.right.get_label(e),
+            Some(&Label::Symbol("context".to_string()))
         );
     }
 
     #[test]
-    fn test_dpo_with_binding() {
-        // DPO rewrite with binding
-        // Rule: λx.f(x) -> λx.g(x)
+    fn test_dpo_preserves_context_connected_to_interface() {
+        // Context connected to interface node is preserved
 
-        // K: interface - the lambda structure without the inner application
         let mut k = BHyp::new();
-        let k_x = k.add_node();
-        let k_body = k.add_node();
-        let k_out = k.add_node();
-        let k_lambda = k
-            .add_edge(
-                vec![SourceWithBinding {
-                    source: k_body,
-                    bound: vec![k_x],
-                }],
-                vec![k_out],
-                Some(Label::Symbol("λ".to_string())),
-            )
-            .unwrap();
+        let k1 = k.add_node();
+        let k2 = k.add_node();
 
-        // L: λx.f(x)
         let mut l = BHyp::new();
-        let l_x = l.add_node();
-        let l_fx = l.add_node(); // result of f(x)
-        let l_out = l.add_node();
-        l.add_edge(
-            vec![SourceWithBinding {
-                source: l_x,
-                bound: vec![],
-            }],
-            vec![l_fx],
-            Some(Label::Symbol("f".to_string())),
-        )
-        .unwrap();
-        let l_lambda = l
+        let l1 = l.add_node();
+        let l2 = l.add_node();
+        let l3 = l.add_node();
+        let l_e = l
             .add_edge(
                 vec![SourceWithBinding {
-                    source: l_fx,
-                    bound: vec![l_x],
+                    source: l1,
+                    bound: vec![],
                 }],
-                vec![l_out],
-                Some(Label::Symbol("λ".to_string())),
+                vec![l3],
+                Some(Label::Symbol("to_delete".to_string())),
             )
             .unwrap();
 
-        // R: λx.g(x)
         let mut r = BHyp::new();
-        let r_x = r.add_node();
-        let r_gx = r.add_node();
-        let r_out = r.add_node();
-        r.add_edge(
-            vec![SourceWithBinding {
-                source: r_x,
-                bound: vec![],
-            }],
-            vec![r_gx],
-            Some(Label::Symbol("g".to_string())),
-        )
-        .unwrap();
-        let r_lambda = r
-            .add_edge(
-                vec![SourceWithBinding {
-                    source: r_gx,
-                    bound: vec![r_x],
-                }],
-                vec![r_out],
-                Some(Label::Symbol("λ".to_string())),
-            )
-            .unwrap();
+        let r1 = r.add_node();
+        let r2 = r.add_node();
 
-        // l: K -> L (maps k_body to l_fx since that's the body input)
-        let l_morph = BHypMorphism::new(
+        let to_l = BHypMorphism::new(
             k.clone(),
             l.clone(),
-            [(k_x, l_x), (k_body, l_fx), (k_out, l_out)]
-                .into_iter()
-                .collect(),
-            [(k_lambda, l_lambda)].into_iter().collect(),
+            [(k1, l1), (k2, l2)].into_iter().collect(),
+            HashMap::new(),
         )
         .unwrap();
 
-        // r: K -> R
-        let r_morph = BHypMorphism::new(
+        let to_r = BHypMorphism::new(
             k.clone(),
             r.clone(),
-            [(k_x, r_x), (k_body, r_gx), (k_out, r_out)]
-                .into_iter()
-                .collect(),
-            [(k_lambda, r_lambda)].into_iter().collect(),
+            [(k1, r1), (k2, r2)].into_iter().collect(),
+            HashMap::new(),
         )
         .unwrap();
 
-        // G: host graph is just L
-        let g = l.clone();
+        let span = Span {
+            left: l.clone(),
+            middle: k,
+            right: r,
+            to_l,
+            to_r,
+        };
 
-        // m: L -> G (identity)
+        // G = L plus context edge from l2
+        let mut g = BHyp::new();
+        let g1 = g.add_node();
+        let g2 = g.add_node();
+        let g3 = g.add_node();
+        let g4 = g.add_node(); // context node
+        let g_e1 = g
+            .add_edge(
+                vec![SourceWithBinding {
+                    source: g1,
+                    bound: vec![],
+                }],
+                vec![g3],
+                Some(Label::Symbol("to_delete".to_string())),
+            )
+            .unwrap();
+        g.add_edge(
+            vec![SourceWithBinding {
+                source: g2,
+                bound: vec![],
+            }],
+            vec![g4],
+            Some(Label::Symbol("context".to_string())),
+        )
+        .unwrap();
+
+        let m = BHypMorphism::new(
+            l.clone(),
+            g.clone(),
+            [(l1, g1), (l2, g2), (l3, g3)].into_iter().collect(),
+            [(l_e, g_e1)].into_iter().collect(),
+        )
+        .unwrap();
+
+        let result = dpo(&span, &g, &m).unwrap();
+
+        // Result should have 3 nodes (l3/g3 deleted) and 1 edge (context preserved)
+        assert_eq!(result.right.nodes().len(), 3);
+        assert_eq!(result.right.edges().len(), 1);
+
+        let e = *result.right.edges().iter().next().unwrap();
+        assert_eq!(
+            result.right.get_label(e),
+            Some(&Label::Symbol("context".to_string()))
+        );
+    }
+
+    // ========================================================================
+    // Binding-Specific DPO Tests
+    // ========================================================================
+
+    #[test]
+    fn test_dpo_preserves_binding_in_context() {
+        // Lambda in context should be preserved with correct binding
+
+        let mut k = BHyp::new();
+        let k1 = k.add_node();
+
+        let mut l = BHyp::new();
+        let l1 = l.add_node();
+
+        let mut r = BHyp::new();
+        let r1 = r.add_node();
+
+        let to_l = BHypMorphism::new(
+            k.clone(),
+            l.clone(),
+            [(k1, l1)].into_iter().collect(),
+            HashMap::new(),
+        )
+        .unwrap();
+
+        let to_r = BHypMorphism::new(
+            k.clone(),
+            r.clone(),
+            [(k1, r1)].into_iter().collect(),
+            HashMap::new(),
+        )
+        .unwrap();
+
+        let span = Span {
+            left: l.clone(),
+            middle: k,
+            right: r,
+            to_l,
+            to_r,
+        };
+
+        // G: matched node plus lambda context
+        let mut g = BHyp::new();
+        let g1 = g.add_node(); // matched
+        let g_x = g.add_node(); // bound var
+        let g_body = g.add_node(); // body
+        let g_out = g.add_node(); // output
+        g.add_edge(
+            vec![SourceWithBinding {
+                source: g_body,
+                bound: vec![g_x],
+            }],
+            vec![g_out],
+            Some(Label::Symbol("λ".to_string())),
+        )
+        .unwrap();
+
+        let m = BHypMorphism::new(
+            l.clone(),
+            g.clone(),
+            [(l1, g1)].into_iter().collect(),
+            HashMap::new(),
+        )
+        .unwrap();
+
+        let result = dpo(&span, &g, &m).unwrap();
+
+        // Lambda with binding should be preserved
+        assert_eq!(result.right.nodes().len(), 4);
+        assert_eq!(result.right.edges().len(), 1);
+
+        let e = *result.right.edges().iter().next().unwrap();
+        let swbs = result.right.get_sources_with_binding(e).unwrap();
+        assert_eq!(swbs.len(), 1);
+        assert_eq!(swbs[0].bound.len(), 1);
+        assert_eq!(
+            result.right.get_label(e),
+            Some(&Label::Symbol("λ".to_string()))
+        );
+    }
+
+    #[test]
+    fn test_dpo_adds_binding_edge() {
+        // Rule adds a lambda edge
+
+        let mut k = BHyp::new();
+        let k1 = k.add_node();
+        let k2 = k.add_node();
+
+        let mut l = BHyp::new();
+        let l1 = l.add_node();
+        let l2 = l.add_node();
+
+        let mut r = BHyp::new();
+        let r1 = r.add_node();
+        let r2 = r.add_node();
+        let r3 = r.add_node(); // new output node
+        r.add_edge(
+            vec![SourceWithBinding {
+                source: r2,
+                bound: vec![r1],
+            }],
+            vec![r3],
+            Some(Label::Symbol("λ".to_string())),
+        )
+        .unwrap();
+
+        let to_l = BHypMorphism::new(
+            k.clone(),
+            l.clone(),
+            [(k1, l1), (k2, l2)].into_iter().collect(),
+            HashMap::new(),
+        )
+        .unwrap();
+
+        let to_r = BHypMorphism::new(
+            k.clone(),
+            r.clone(),
+            [(k1, r1), (k2, r2)].into_iter().collect(),
+            HashMap::new(),
+        )
+        .unwrap();
+
+        let span = Span {
+            left: l.clone(),
+            middle: k,
+            right: r,
+            to_l,
+            to_r,
+        };
+
+        let g = l.clone();
         let m = identity_morphism(&l);
 
-        // Compute pushout complement
-        let poc_result = compute_pushout_complement(&l_morph, &m).unwrap();
+        let result = dpo(&span, &g, &m).unwrap();
 
-        // C should have 3 nodes and 1 edge (lambda preserved, f removed)
-        assert_eq!(poc_result.complement.nodes().len(), 3);
-        assert_eq!(poc_result.complement.edges().len(), 1);
+        // Should have 3 nodes and 1 lambda edge
+        assert_eq!(result.right.nodes().len(), 3);
+        assert_eq!(result.right.edges().len(), 1);
 
-        // Compute final result
-        let po_result = compute_pushout(&r_morph, &poc_result.morphism_from_k).unwrap();
-
-        // H should have 3 nodes and 2 edges (lambda + g)
-        assert_eq!(po_result.pushout.nodes().len(), 3);
-        assert_eq!(po_result.pushout.edges().len(), 2);
+        let e = *result.right.edges().iter().next().unwrap();
+        let swbs = result.right.get_sources_with_binding(e).unwrap();
+        assert_eq!(swbs[0].bound.len(), 1);
     }
+
 }
 
 
