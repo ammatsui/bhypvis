@@ -1,8 +1,8 @@
 [package]
-name = "hypergraph_dpo"
+name = "bhyp"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
-name = "hypergraph_dpo"
+name = "bhyp"
 path = "src/lib.rs"
