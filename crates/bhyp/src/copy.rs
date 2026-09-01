@@ -118,31 +118,196 @@ pub struct GlueResult {
 }
 
 
+
+
+/// Check if T is a subhypergraph of G, and if so return the inclusion morphism
+pub fn find_subhypergraph_inclusion(t: &BHyp, g: &BHyp) -> Option<BHypMorphism> {
+    // T can only be a subhypergraph if it has at most as many nodes and edges as G
+    if t.nodes().len() > g.nodes().len() || t.edges().len() > g.edges().len() {
+        return None;
+    }
+
+    let t_nodes: Vec<NodeId> = t.nodes().iter().copied().collect();
+    let g_nodes: Vec<NodeId> = g.nodes().iter().copied().collect();
+
+    // Empty T is always a subhypergraph of G
+    if t_nodes.is_empty() && t.edges().is_empty() {
+        return Some(BHypMorphism::new(
+            t.clone(), g.clone(), HashMap::new(), HashMap::new()
+        ).unwrap());
+    }
+
+    // For small graphs, try all possible injective mappings from T to G
+    fn try_inclusion(
+        t: &BHyp,
+        g: &BHyp,
+        t_nodes: &[NodeId],
+        g_nodes: &[NodeId],
+        node_map: &mut HashMap<NodeId, NodeId>,
+        idx: usize,
+        used: &mut HashSet<NodeId>,
+    ) -> Option<HashMap<EdgeId, EdgeId>> {
+        if idx == t_nodes.len() {
+            // Check if this node mapping induces a valid edge inclusion
+            let mut edge_map: HashMap<EdgeId, EdgeId> = HashMap::new();
+
+            for &e_t in t.edges() {
+                let mut found = false;
+                for &e_g in g.edges() {
+                    if edge_map.values().any(|&e| e == e_g) {
+                        continue;
+                    }
+
+                    // Check compatibility
+                    let swbs_t = t.get_sources_with_binding(e_t).unwrap();
+                    let swbs_g = g.get_sources_with_binding(e_g).unwrap();
+                    let targets_t = t.get_targets(e_t).unwrap();
+                    let targets_g = g.get_targets(e_g).unwrap();
+
+                    if swbs_t.len() != swbs_g.len() || targets_t.len() != targets_g.len() {
+                        continue;
+                    }
+
+                    let mut compatible = true;
+
+                    // Check sources and bindings
+                    for (s_t, s_g) in swbs_t.iter().zip(swbs_g.iter()) {
+                        if node_map[&s_t.source] != s_g.source {
+                            compatible = false;
+                            break;
+                        }
+                        if s_t.bound.len() != s_g.bound.len() {
+                            compatible = false;
+                            break;
+                        }
+                        for (b_t, b_g) in s_t.bound.iter().zip(s_g.bound.iter()) {
+                            if node_map[b_t] != *b_g {
+                                compatible = false;
+                                break;
+                            }
+                        }
+                        if !compatible {
+                            break;
+                        }
+                    }
+
+                    if !compatible {
+                        continue;
+                    }
+
+                    // Check targets
+                    for (t_t, t_g) in targets_t.iter().zip(targets_g.iter()) {
+                        if node_map[t_t] != *t_g {
+                            compatible = false;
+                            break;
+                        }
+                    }
+
+                    if !compatible {
+                        continue;
+                    }
+
+                    // Check labels
+                    if t.get_label(e_t) != g.get_label(e_g) {
+                        continue;
+                    }
+
+                    edge_map.insert(e_t, e_g);
+                    found = true;
+                    break;
+                }
+
+                if !found {
+                    return None;
+                }
+            }
+
+            return Some(edge_map);
+        }
+
+        let n_t = t_nodes[idx];
+        for &n_g in g_nodes {
+            if used.contains(&n_g) {
+                continue;
+            }
+
+            node_map.insert(n_t, n_g);
+            used.insert(n_g);
+
+            if let Some(edge_map) = try_inclusion(t, g, t_nodes, g_nodes, node_map, idx + 1, used) {
+                return Some(edge_map);
+            }
+
+            node_map.remove(&n_t);
+            used.remove(&n_g);
+        }
+
+        None
+    }
+
+    let mut node_map = HashMap::new();
+    let mut used = HashSet::new();
+
+    if let Some(edge_map) = try_inclusion(t, g, &t_nodes, &g_nodes, &mut node_map, 0, &mut used) {
+        Some(BHypMorphism::new(
+            t.clone(), g.clone(), node_map, edge_map
+        ).unwrap())
+    } else {
+        None
+    }
+}
+
+/// Check if T is a subhypergraph of G (without returning the morphism)
+pub fn is_subhypergraph(t: &BHyp, g: &BHyp) -> bool {
+    find_subhypergraph_inclusion(t, g).is_some()
+}
+
+
+
+
+
+
+
 // hypergraph inclusion 
-pub fn build_inclusion(h1: &BHyp, h2: &BHyp) -> Result<BHypMorphism, MorphismError> {
-        let mut node_map = HashMap::new();
-        let mut edge_map = HashMap::new();
+pub fn build_inclusion(t: &BHyp, g: &BHyp) -> Result<BHypMorphism, MorphismError> {
+    if is_subhypergraph(&t, &g) {
+        
+        let option = find_subhypergraph_inclusion(&t, &g);
 
-        // For a strict inclusion, f(v) = v
-        for &node in h1.nodes() {
-            if h2.nodes().contains(&node) {
-                node_map.insert(node, node);
-            }
-        }
+// Converts Some(bhyp) -> Ok(bhyp)
+// Converts None -> Err(CopyError::InvalidSubhypergraph(...))
+    let result = option.ok_or(
+    MorphismError::DomainMismatch
+);   
+return result
+    }
 
-        // For a strict inclusion, f(e) = e
-        for &edge in h1.edges() {
-            if h2.edges().contains(&edge) {
-                edge_map.insert(edge, edge);
-            }
-        }
+    return Err(MorphismError::DomainMismatch);
 
-        BHypMorphism::new(
-            h1.clone(), 
-            h2.clone(),
-            node_map,
-            edge_map
-        )
+    
+        // let mut node_map = HashMap::new();
+        // let mut edge_map = HashMap::new();
+
+        // // For a strict inclusion, f(v) = v
+        // for &node in h1.nodes() {
+        //     if h2.nodes().contains(&node) {
+        //         node_map.insert(node, node);
+        //     }
+        // }
+
+        // // For a strict inclusion, f(e) = e
+        // for &edge in h1.edges() {
+        //     if h2.edges().contains(&edge) {
+        //         edge_map.insert(edge, edge);
+        //     }
+        // }
+
+        // BHypMorphism::new(
+        //     h1.clone(), 
+        //     h2.clone(),
+        //     node_map,
+        //     edge_map
+        // )
 }
 
 // ============================================================================
@@ -232,10 +397,12 @@ fn check_copying_conditions(
     let t_int = BHyp_with_interface::from_bhyp(t.clone());
 
     let k_node = shared_node.middle.nodes().iter().next().unwrap();
+
+    let im = shared_node.to_l.map_node(*k_node).unwrap();
     
     // Check that shared_node is in T's output interface
-    if !t_int.is_output(*k_node) {
-        return Err(CopyError::NodeNotInOutput(*k_node));
+    if !t_int.is_output(im) {
+        return Err(CopyError::NodeNotInOutput(im));
     }
  
     
@@ -398,6 +565,8 @@ mod copying_tests {
     use super::*;
     use crate::{bhyp::{BHyp, BHyp_with_interface, Label, SourceWithBinding}, categorical::are_isomorphic};
 
+   
+   
     // ============================================================================
     // Safe Copying Conditions Tests
     // ============================================================================
