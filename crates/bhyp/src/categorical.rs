@@ -845,6 +845,7 @@ pub fn compute_pullback(
 /// The pushout complement exists iff the gluing conditions are satisfied:
 /// 1. Identification condition: if m identifies two elements of L, they must both be in l(K)
 /// 2. Dangling condition: no edge in G \ m(L) is incident to a node in m(L \ l(K))
+
 pub fn compute_pushout_complement(
     l: &BHypMorphism, // l: K -> L
     m: &BHypMorphism, // m: L -> G
@@ -874,9 +875,10 @@ pub fn compute_pushout_complement(
         .collect();
 
     // ========================================================================
-    // Check Identification Condition
+    // Check Identification Condition (modified for non-injective l)
     // ========================================================================
     // If m identifies two nodes of L, they must both be in l(K)
+    // AND l must identify them the same way (same preimages in K)
     let l_nodes: Vec<_> = l_graph.nodes().iter().copied().collect();
     for (i, &l1) in l_nodes.iter().enumerate() {
         for &l2 in l_nodes.iter().skip(i + 1) {
@@ -960,97 +962,207 @@ pub fn compute_pushout_complement(
     }
 
     // ========================================================================
-    // Construct C = G \ (m(L) \ m(l(K)))
+    // Construct C with proper handling of non-injective l
     // ========================================================================
-    // C contains:
-    // - Nodes: G nodes that are either NOT in m(L), OR are in m(l(K))
-    // - Edges: G edges that are either NOT in m(L), OR are in m(l(K))
+    // 
+    // Key insight: When l identifies multiple K-nodes to the same L-node,
+    // we need multiple copies in C to ensure K -> C is injective.
+    //
+    // Strategy:
+    // 1. For each K-node, create a corresponding C-node
+    // 2. For G-nodes outside m(L), create one C-node (context, shared)
+    // 3. For edges, similar logic applies
 
     let mut complement = BHyp::new();
 
-    // Determine which G nodes go into C
+    // ========================================================================
+    // Build K -> C node mapping (one C-node per K-node)
+    // ========================================================================
+    let mut k_to_c_nodes: HashMap<NodeId, NodeId> = HashMap::new();
+    
+    // Track which G-nodes are "duplicated" via K
+    // g_node -> list of C-nodes that correspond to it
+    let mut g_node_to_c_nodes: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
+
+    let mut k_nodes: Vec<_> = k.nodes().iter().copied().collect();
+    k_nodes.sort();
+
+    for k_n in k_nodes {
+        let l_n = l.map_node(k_n).unwrap();
+        let g_n = m.map_node(l_n).unwrap();
+        
+        let c_n = complement.add_node();
+        k_to_c_nodes.insert(k_n, c_n);
+        g_node_to_c_nodes.entry(g_n).or_insert_with(Vec::new).push(c_n);
+    }
+
+    // ========================================================================
+    // Add context nodes (G-nodes not in m(L))
+    // ========================================================================
     let mut g_to_c_nodes: HashMap<NodeId, NodeId> = HashMap::new();
 
     let mut g_nodes: Vec<_> = g.nodes().iter().copied().collect();
     g_nodes.sort();
 
     for g_n in g_nodes {
-        let in_ml = m_node_image.contains(&g_n);
-        let in_mlk = mlk_node_image.contains(&g_n);
-
-        // Keep if: not in m(L), or in m(l(K))
-        if !in_ml || in_mlk {
+        if !m_node_image.contains(&g_n) {
+            // Context node - not in m(L), keep as single node
             let c_n = complement.add_node();
             g_to_c_nodes.insert(g_n, c_n);
+            g_node_to_c_nodes.entry(g_n).or_insert_with(Vec::new).push(c_n);
         }
+        // Nodes in m(L) \ m(l(K)) are "deleted" - don't add to C
+        // Nodes in m(l(K)) are already added via K above
     }
 
-    // Determine which G edges go into C
-    let mut g_to_c_edges: HashMap<EdgeId, EdgeId> = HashMap::new();
+    // ========================================================================
+    // Build K -> C edge mapping (one C-edge per K-edge)
+    // ========================================================================
+    let mut k_to_c_edges: HashMap<EdgeId, EdgeId> = HashMap::new();
+    
+    // Track which G-edges are "duplicated" via K
+    let mut g_edge_to_c_edges: HashMap<EdgeId, Vec<EdgeId>> = HashMap::new();
+
+    let mut k_edges: Vec<_> = k.edges().iter().copied().collect();
+    k_edges.sort();
+
+    for k_e in k_edges {
+        let l_e = l.map_edge(k_e).unwrap();
+        let g_e = m.map_edge(l_e).unwrap();
+        
+        // Get the edge structure from G
+        let swbs = g.get_sources_with_binding(g_e).unwrap();
+        let targets = g.get_targets(g_e).unwrap();
+        let label = g.get_label(g_e).cloned();
+
+        // Map the incident nodes through K's mapping
+        // We need to find which C-nodes correspond to this K-edge's incident nodes
+        let k_swbs = k.get_sources_with_binding(k_e).unwrap();
+        let k_targets = k.get_targets(k_e).unwrap();
+
+        let new_swbs: Vec<SourceWithBinding> = k_swbs
+            .iter()
+            .map(|k_swb| SourceWithBinding {
+                source: k_to_c_nodes[&k_swb.source],
+                bound: k_swb.bound.iter().map(|&b| k_to_c_nodes[&b]).collect(),
+            })
+            .collect();
+
+        let new_targets: Vec<NodeId> = k_targets
+            .iter()
+            .map(|&t| k_to_c_nodes[&t])
+            .collect();
+
+        let c_e = complement.add_edge(new_swbs, new_targets, label).unwrap();
+        k_to_c_edges.insert(k_e, c_e);
+        g_edge_to_c_edges.entry(g_e).or_insert_with(Vec::new).push(c_e);
+    }
+
+    // ========================================================================
+    // Add context edges (G-edges not in m(L))
+    // ========================================================================
+    // These edges connect to nodes that are either:
+    // - Context nodes (single copy)
+    // - Interface nodes in m(l(K)) (possibly multiple copies)
+    //
+    // For context edges touching interface nodes, we need to decide which
+    // copy they attach to. The correct approach: each context edge attaches
+    // to exactly ONE of the copies (creating the "distributed" effect).
 
     let mut g_edges: Vec<_> = g.edges().iter().copied().collect();
     g_edges.sort();
 
+    // Build reverse mapping: for nodes in m(l(K)), find which K-nodes map to them
+    let mut g_to_k_nodes: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
+    for (&k_n, _) in &k_to_c_nodes {
+        let l_n = l.map_node(k_n).unwrap();
+        let g_n = m.map_node(l_n).unwrap();
+        g_to_k_nodes.entry(g_n).or_insert_with(Vec::new).push(k_n);
+    }
+
+    // Track how many times we've used each interface node for context edges
+    let mut interface_node_usage: HashMap<NodeId, usize> = HashMap::new();
+
     for g_e in g_edges {
-        let in_ml = m_edge_image.contains(&g_e);
-        let in_mlk = mlk_edge_image.contains(&g_e);
-
-        // Keep if: not in m(L), or in m(l(K))
-        if !in_ml || in_mlk {
-            let swbs = g.get_sources_with_binding(g_e).unwrap();
-            let targets = g.get_targets(g_e).unwrap();
-            let label = g.get_label(g_e).cloned();
-
-            // All incident nodes must be in C
-            let new_swbs: Vec<SourceWithBinding> = swbs
-                .iter()
-                .map(|swb| SourceWithBinding {
-                    source: g_to_c_nodes[&swb.source],
-                    bound: swb.bound.iter().map(|&b| g_to_c_nodes[&b]).collect(),
-                })
-                .collect();
-
-            let new_targets: Vec<NodeId> = targets.iter().map(|&t| g_to_c_nodes[&t]).collect();
-
-            let c_e = complement.add_edge(new_swbs, new_targets, label).unwrap();
-            g_to_c_edges.insert(g_e, c_e);
+        if m_edge_image.contains(&g_e) {
+            continue; // Edge is in m(L), already handled via K
         }
+
+        // This is a context edge
+        let swbs = g.get_sources_with_binding(g_e).unwrap();
+        let targets = g.get_targets(g_e).unwrap();
+        let label = g.get_label(g_e).cloned();
+
+        // Map incident nodes to C
+        // For interface nodes (in mlk_node_image), pick the appropriate copy
+        let new_swbs: Vec<SourceWithBinding> = swbs
+            .iter()
+            .map(|swb| {
+                let c_source = resolve_g_node_to_c(
+                    swb.source,
+                    &mlk_node_image,
+                    &g_to_c_nodes,
+                    &g_to_k_nodes,
+                    &k_to_c_nodes,
+                    &mut interface_node_usage,
+                );
+                let c_bound: Vec<NodeId> = swb
+                    .bound
+                    .iter()
+                    .map(|&b| {
+                        resolve_g_node_to_c(
+                            b,
+                            &mlk_node_image,
+                            &g_to_c_nodes,
+                            &g_to_k_nodes,
+                            &k_to_c_nodes,
+                            &mut interface_node_usage,
+                        )
+                    })
+                    .collect();
+                SourceWithBinding {
+                    source: c_source,
+                    bound: c_bound,
+                }
+            })
+            .collect();
+
+        let new_targets: Vec<NodeId> = targets
+            .iter()
+            .map(|&t| {
+                resolve_g_node_to_c(
+                    t,
+                    &mlk_node_image,
+                    &g_to_c_nodes,
+                    &g_to_k_nodes,
+                    &k_to_c_nodes,
+                    &mut interface_node_usage,
+                )
+            })
+            .collect();
+
+        let c_e = complement.add_edge(new_swbs, new_targets, label).unwrap();
+        g_edge_to_c_edges.entry(g_e).or_insert_with(Vec::new).push(c_e);
     }
 
     // ========================================================================
-    // Build morphism k: K -> C
+    // Build morphism c: C -> G
     // ========================================================================
-    // For each element of K, follow: K -l-> L -m-> G -> C
+    // This is no longer injective when l was non-injective
+    let mut c_to_g_nodes: HashMap<NodeId, NodeId> = HashMap::new();
+    let mut c_to_g_edges: HashMap<EdgeId, EdgeId> = HashMap::new();
 
-    let k_to_c_nodes: HashMap<NodeId, NodeId> = k
-        .nodes()
-        .iter()
-        .map(|&k_n| {
-            let l_n = l.map_node(k_n).unwrap();
-            let g_n = m.map_node(l_n).unwrap();
-            let c_n = g_to_c_nodes[&g_n];
-            (k_n, c_n)
-        })
-        .collect();
+    for (&g_n, c_nodes) in &g_node_to_c_nodes {
+        for &c_n in c_nodes {
+            c_to_g_nodes.insert(c_n, g_n);
+        }
+    }
 
-    let k_to_c_edges: HashMap<EdgeId, EdgeId> = k
-        .edges()
-        .iter()
-        .map(|&k_e| {
-            let l_e = l.map_edge(k_e).unwrap();
-            let g_e = m.map_edge(l_e).unwrap();
-            let c_e = g_to_c_edges[&g_e];
-            (k_e, c_e)
-        })
-        .collect();
-
-    // ========================================================================
-    // Build morphism c: C -> G (inclusion)
-    // ========================================================================
-    let c_to_g_nodes: HashMap<NodeId, NodeId> =
-        g_to_c_nodes.iter().map(|(&g_n, &c_n)| (c_n, g_n)).collect();
-    let c_to_g_edges: HashMap<EdgeId, EdgeId> =
-        g_to_c_edges.iter().map(|(&g_e, &c_e)| (c_e, g_e)).collect();
+    for (&g_e, c_edges) in &g_edge_to_c_edges {
+        for &c_e in c_edges {
+            c_to_g_edges.insert(c_e, g_e);
+        }
+    }
 
     let k_to_c = BHypMorphism::new(k.clone(), complement.clone(), k_to_c_nodes, k_to_c_edges)?;
 
@@ -1062,6 +1174,249 @@ pub fn compute_pushout_complement(
         morphism_to_g: c_to_g,
     })
 }
+
+/// Helper function to resolve a G-node to the appropriate C-node
+/// For context nodes: direct mapping
+/// For interface nodes: round-robin among copies to distribute context edges
+fn resolve_g_node_to_c(
+    g_n: NodeId,
+    mlk_node_image: &HashSet<NodeId>,
+    g_to_c_nodes: &HashMap<NodeId, NodeId>,
+    g_to_k_nodes: &HashMap<NodeId, Vec<NodeId>>,
+    k_to_c_nodes: &HashMap<NodeId, NodeId>,
+    interface_node_usage: &mut HashMap<NodeId, usize>,
+) -> NodeId {
+    if mlk_node_image.contains(&g_n) {
+        // Interface node - pick one of the copies
+        let k_nodes = &g_to_k_nodes[&g_n];
+        let usage = interface_node_usage.entry(g_n).or_insert(0);
+        let idx = *usage % k_nodes.len();
+        *usage += 1;
+        k_to_c_nodes[&k_nodes[idx]]
+    } else {
+        // Context node - direct mapping
+        g_to_c_nodes[&g_n]
+    }
+}
+
+
+// pub fn compute_pushout_complement(
+//     l: &BHypMorphism, // l: K -> L
+//     m: &BHypMorphism, // m: L -> G
+// ) -> Result<PushoutComplementResult, CategoricalError> {
+//     let k = &l.domain;
+//     let l_graph = &l.codomain;
+//     let g = &m.codomain;
+
+//     // Compute the images
+//     let l_node_image: HashSet<NodeId> = l.node_image(); // l(K) nodes in L
+//     let l_edge_image: HashSet<EdgeId> = l.edge_image(); // l(K) edges in L
+
+//     // m(L) in G
+//     let m_node_image: HashSet<NodeId> = m.node_image();
+//     let m_edge_image: HashSet<EdgeId> = m.edge_image();
+
+//     // m(l(K)) in G - the "gluing interface"
+//     let mlk_node_image: HashSet<NodeId> = l
+//         .on_nodes
+//         .values()
+//         .filter_map(|&l_n| m.map_node(l_n))
+//         .collect();
+//     let mlk_edge_image: HashSet<EdgeId> = l
+//         .on_edges
+//         .values()
+//         .filter_map(|&l_e| m.map_edge(l_e))
+//         .collect();
+
+//     // ========================================================================
+//     // Check Identification Condition
+//     // ========================================================================
+//     // If m identifies two nodes of L, they must both be in l(K)
+//     let l_nodes: Vec<_> = l_graph.nodes().iter().copied().collect();
+//     for (i, &l1) in l_nodes.iter().enumerate() {
+//         for &l2 in l_nodes.iter().skip(i + 1) {
+//             if m.map_node(l1) == m.map_node(l2) {
+//                 let l1_in_lk = l_node_image.contains(&l1);
+//                 let l2_in_lk = l_node_image.contains(&l2);
+//                 if !l1_in_lk || !l2_in_lk {
+//                     return Err(CategoricalError::IdentificationConditionViolated(format!(
+//                         "Nodes {:?} and {:?} identified by m but not both in l(K)",
+//                         l1, l2
+//                     )));
+//                 }
+//             }
+//         }
+//     }
+
+//     // If m identifies two edges of L, they must both be in l(K)
+//     let l_edges: Vec<_> = l_graph.edges().iter().copied().collect();
+//     for (i, &e1) in l_edges.iter().enumerate() {
+//         for &e2 in l_edges.iter().skip(i + 1) {
+//             if m.map_edge(e1) == m.map_edge(e2) {
+//                 let e1_in_lk = l_edge_image.contains(&e1);
+//                 let e2_in_lk = l_edge_image.contains(&e2);
+//                 if !e1_in_lk || !e2_in_lk {
+//                     return Err(CategoricalError::IdentificationConditionViolated(format!(
+//                         "Edges {:?} and {:?} identified by m but not both in l(K)",
+//                         e1, e2
+//                     )));
+//                 }
+//             }
+//         }
+//     }
+
+//     // ========================================================================
+//     // Check Dangling Condition
+//     // ========================================================================
+//     // Nodes in m(L \ l(K)) - these are "deleted" nodes
+//     let deleted_nodes: HashSet<NodeId> = l_graph
+//         .nodes()
+//         .iter()
+//         .filter(|&l_n| !l_node_image.contains(l_n))
+//         .filter_map(|&l_n| m.map_node(l_n))
+//         .collect();
+
+//     // Edges in G \ m(L) - these are "context" edges that stay
+//     for &g_e in g.edges() {
+//         if m_edge_image.contains(&g_e) {
+//             continue; // This edge is in m(L), skip
+//         }
+
+//         // This edge is in G \ m(L), check it doesn't touch deleted nodes
+//         if let Some(swbs) = g.get_sources_with_binding(g_e) {
+//             for swb in swbs {
+//                 if deleted_nodes.contains(&swb.source) {
+//                     return Err(CategoricalError::DanglingConditionViolated(format!(
+//                         "Edge {:?} in G\\m(L) has source {:?} in m(L\\l(K))",
+//                         g_e, swb.source
+//                     )));
+//                 }
+//                 for &b in &swb.bound {
+//                     if deleted_nodes.contains(&b) {
+//                         return Err(CategoricalError::DanglingConditionViolated(format!(
+//                             "Edge {:?} in G\\m(L) binds node {:?} in m(L\\l(K))",
+//                             g_e, b
+//                         )));
+//                     }
+//                 }
+//             }
+//         }
+
+//         if let Some(targets) = g.get_targets(g_e) {
+//             for &t in targets {
+//                 if deleted_nodes.contains(&t) {
+//                     return Err(CategoricalError::DanglingConditionViolated(format!(
+//                         "Edge {:?} in G\\m(L) has target {:?} in m(L\\l(K))",
+//                         g_e, t
+//                     )));
+//                 }
+//             }
+//         }
+//     }
+
+//     // ========================================================================
+//     // Construct C = G \ (m(L) \ m(l(K)))
+//     // ========================================================================
+//     // C contains:
+//     // - Nodes: G nodes that are either NOT in m(L), OR are in m(l(K))
+//     // - Edges: G edges that are either NOT in m(L), OR are in m(l(K))
+
+//     let mut complement = BHyp::new();
+
+//     // Determine which G nodes go into C
+//     let mut g_to_c_nodes: HashMap<NodeId, NodeId> = HashMap::new();
+
+//     let mut g_nodes: Vec<_> = g.nodes().iter().copied().collect();
+//     g_nodes.sort();
+
+//     for g_n in g_nodes {
+//         let in_ml = m_node_image.contains(&g_n);
+//         let in_mlk = mlk_node_image.contains(&g_n);
+
+//         // Keep if: not in m(L), or in m(l(K))
+//         if !in_ml || in_mlk {
+//             let c_n = complement.add_node();
+//             g_to_c_nodes.insert(g_n, c_n);
+//         }
+//     }
+
+//     // Determine which G edges go into C
+//     let mut g_to_c_edges: HashMap<EdgeId, EdgeId> = HashMap::new();
+
+//     let mut g_edges: Vec<_> = g.edges().iter().copied().collect();
+//     g_edges.sort();
+
+//     for g_e in g_edges {
+//         let in_ml = m_edge_image.contains(&g_e);
+//         let in_mlk = mlk_edge_image.contains(&g_e);
+
+//         // Keep if: not in m(L), or in m(l(K))
+//         if !in_ml || in_mlk {
+//             let swbs = g.get_sources_with_binding(g_e).unwrap();
+//             let targets = g.get_targets(g_e).unwrap();
+//             let label = g.get_label(g_e).cloned();
+
+//             // All incident nodes must be in C
+//             let new_swbs: Vec<SourceWithBinding> = swbs
+//                 .iter()
+//                 .map(|swb| SourceWithBinding {
+//                     source: g_to_c_nodes[&swb.source],
+//                     bound: swb.bound.iter().map(|&b| g_to_c_nodes[&b]).collect(),
+//                 })
+//                 .collect();
+
+//             let new_targets: Vec<NodeId> = targets.iter().map(|&t| g_to_c_nodes[&t]).collect();
+
+//             let c_e = complement.add_edge(new_swbs, new_targets, label).unwrap();
+//             g_to_c_edges.insert(g_e, c_e);
+//         }
+//     }
+
+//     // ========================================================================
+//     // Build morphism k: K -> C
+//     // ========================================================================
+//     // For each element of K, follow: K -l-> L -m-> G -> C
+
+//     let k_to_c_nodes: HashMap<NodeId, NodeId> = k
+//         .nodes()
+//         .iter()
+//         .map(|&k_n| {
+//             let l_n = l.map_node(k_n).unwrap();
+//             let g_n = m.map_node(l_n).unwrap();
+//             let c_n = g_to_c_nodes[&g_n];
+//             (k_n, c_n)
+//         })
+//         .collect();
+
+//     let k_to_c_edges: HashMap<EdgeId, EdgeId> = k
+//         .edges()
+//         .iter()
+//         .map(|&k_e| {
+//             let l_e = l.map_edge(k_e).unwrap();
+//             let g_e = m.map_edge(l_e).unwrap();
+//             let c_e = g_to_c_edges[&g_e];
+//             (k_e, c_e)
+//         })
+//         .collect();
+
+//     // ========================================================================
+//     // Build morphism c: C -> G (inclusion)
+//     // ========================================================================
+//     let c_to_g_nodes: HashMap<NodeId, NodeId> =
+//         g_to_c_nodes.iter().map(|(&g_n, &c_n)| (c_n, g_n)).collect();
+//     let c_to_g_edges: HashMap<EdgeId, EdgeId> =
+//         g_to_c_edges.iter().map(|(&g_e, &c_e)| (c_e, g_e)).collect();
+
+//     let k_to_c = BHypMorphism::new(k.clone(), complement.clone(), k_to_c_nodes, k_to_c_edges)?;
+
+//     let c_to_g = BHypMorphism::new(complement.clone(), g.clone(), c_to_g_nodes, c_to_g_edges)?;
+
+//     Ok(PushoutComplementResult {
+//         complement,
+//         morphism_from_k: k_to_c,
+//         morphism_to_g: c_to_g,
+//     })
+// }
 
 
 /// double-pushout diagram
