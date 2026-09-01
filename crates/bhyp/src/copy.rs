@@ -802,21 +802,23 @@ mod copying_tests {
     
        let mut tt = BHyp::new();
         let n_in = tt.add_node();
-        let n_out = tt.add_node();
+        let o1 = tt.add_node();
+        let o2 = tt.add_node();
+        let o3 = tt.add_node();
         
         tt.add_edge(
             vec![SourceWithBinding { source: n_in, bound: vec![] }],
-            vec![n_out],
+            vec![o1],
             Some(Label::Symbol("e".to_string()))
         ).unwrap();
         tt.add_edge(
             vec![SourceWithBinding { source: n_in, bound: vec![] }],
-            vec![n_out],
+            vec![o2],
             Some(Label::Symbol("e".to_string()))
         ).unwrap();
         tt.add_edge(
             vec![SourceWithBinding { source: n_in, bound: vec![] }],
-            vec![n_out],
+            vec![o3],
             Some(Label::Symbol("e".to_string()))
         ).unwrap();
 
