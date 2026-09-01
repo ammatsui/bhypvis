@@ -2197,9 +2197,100 @@ mod tests {
     //     ));
     // }
 
-    // // ========================================================================
-    // // Pushout Complement Tests - With Binding
-    // // ========================================================================
+    // ========================================================================
+    // Pushout Complement Tests - With Binding
+    // ========================================================================
+
+    #[test]
+    fn test_pushout_complement_delete_body()
+    {
+        // lambda body insertion
+        let mut k = BHyp::new();
+        let k1 = k.add_node();
+        let k2 = k.add_node();
+
+        // L: f(x)
+        let mut b = BHyp::new();
+        let b_x = b.add_node();
+        let b_out = b.add_node();
+        let b_f = b.add_edge(
+            vec![SourceWithBinding {
+                source: b_x,
+                bound: vec![],
+            }],
+            vec![b_out],
+            Some(Label::Symbol("f".to_string())),
+        )
+        .unwrap();
+
+
+        let mut gg = BHyp::new();
+        let g_y = gg.add_node();
+        let g_out = gg.add_node();
+        let g_in = gg.add_node();
+
+        gg.add_edge(
+            vec![SourceWithBinding {
+                source: g_in,
+                bound: vec![g_y],
+            }],
+            vec![g_out],
+            Some(Label::Symbol("λ".to_string())),
+        )
+        .unwrap();
+
+        let g_f = gg.add_edge(
+            vec![SourceWithBinding {
+                source: g_y,
+                bound: vec![],
+            }],
+            vec![g_in],
+            Some(Label::Symbol("f".to_string())),
+        )
+        .unwrap();
+
+
+
+        let f = 
+        BHypMorphism::new(
+            k.clone(), 
+            b.clone(), 
+            [(k1, b_x), (k2, b_out)].into_iter().collect(),
+            HashMap::new(),
+        ).unwrap();
+
+        let g = BHypMorphism::new(
+            b.clone(), 
+            gg.clone(), 
+            [(b_x, g_y), (b_out, g_in)].into_iter().collect(), 
+            [(b_f, g_f)].into_iter().collect()
+        ).unwrap();
+
+        let result = compute_pushout_complement(&f, &g).unwrap();
+
+        // result should be λy.[](y)
+        assert_eq!(result.complement.nodes().len(), 3);
+        assert_eq!(result.complement.edges().len(), 1);
+
+
+        // C: λy.[]y
+        let mut c = BHyp::new();
+        let c_y = c.add_node();
+        let c_out = c.add_node();
+        let c_in = c.add_node();
+        c.add_edge(
+            vec![SourceWithBinding {
+                source: c_in,
+                bound: vec![c_y],
+            }],
+            vec![c_out],
+            Some(Label::Symbol("λ".to_string())),
+        )
+        .unwrap();
+        
+
+        assert!(are_isomorphic(&result.complement, &c));
+    }
 
     // #[test]
     // fn test_pushout_complement_delete_lambda() {

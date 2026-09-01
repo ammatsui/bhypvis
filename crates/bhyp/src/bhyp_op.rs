@@ -3,540 +3,567 @@
 // //- Copying: duplicates a shared sub-hypergraph
 // // - Glueing: merges multiple inclusions of a sub-hypergraph (inverse of copying)
 
-// use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 
-// use crate::bhyp::{BHyp, BHyp_with_interface, EdgeId, Label, NodeId, SourceWithBinding};
-// use crate::categorical::{
-//     compute_pushout, compute_pullback, compute_pushout_complement,
-//     BHypMorphism, CategoricalError, MorphismError, PushoutResult,
-// };
+use crate::bhyp::{BHyp, BHyp_with_interface, EdgeId, Label, NodeId, SourceWithBinding};
+use crate::categorical::{
+    BHypMorphism, CategoricalError, MorphismError, PushoutResult, 
+    compute_pullback, compute_pushout, compute_pushout_complement, compute_coproduct,
+    identity_morphism,
+};
 
-// /// Errors specific to copying and glueing operations
-// #[derive(Debug, Clone, PartialEq, Eq)]
-// pub enum CopyGlueError {
-//     /// The vertex doesn't have enough out-degree for copying
-//     InsufficientOutDegree { node: NodeId, required: usize, actual: usize },
-//     /// The sub-hypergraph doesn't satisfy safe copying conditions
-//     UnsafeCopyingCondition(String),
-//     /// The node is not in the output interface of the sub-hypergraph
-//     NodeNotInOutput(NodeId),
-//     /// The sub-hypergraph is not valid
-//     InvalidSubhypergraph(String),
-//     /// Categorical construction failed
-//     CategoricalError(CategoricalError),
-//     /// Morphism error
-//     MorphismError(MorphismError),
-//     /// Glueing requires at least 2 inclusions
-//     InsufficientInclusions,
-//     /// Inclusions are not compatible
-//     IncompatibleInclusions(String),
-// }
+/// Errors specific to copying and glueing operations
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CopyError {
+    /// The node is not in the output interface of the sub-hypergraph
+    NodeNotInOutput(NodeId),
+    /// The sub-hypergraph is not valid
+    InvalidSubhypergraph(String),
+    /// Categorical construction failed
+    CategoricalError(CategoricalError),
+    /// Morphism error
+    MorphismError(MorphismError),
+}
 
-// impl From<CategoricalError> for CopyGlueError {
-//     fn from(e: CategoricalError) -> Self {
-//         CopyGlueError::CategoricalError(e)
-//     }
-// }
+/// Errors specific to copying and glueing operations
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GlueError {
+    /// The sub-hypergraph is not valid
+    InvalidSubhypergraph(String),
+    /// Categorical construction failed
+    CategoricalError(CategoricalError),
+    /// Morphism error
+    MorphismError(MorphismError),
+    /// Inclusions are not compatible
+    IncompatibleInclusions(String),
+}
 
-// impl From<MorphismError> for CopyGlueError {
-//     fn from(e: MorphismError) -> Self {
-//         CopyGlueError::MorphismError(e)
-//     }
-// }
+impl From<CategoricalError> for CopyError {
+    fn from(e: CategoricalError) -> Self {
+        CopyError::CategoricalError(e)
+    }
+}
 
-// impl std::fmt::Display for CopyGlueError {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         match self {
-//             CopyGlueError::InsufficientOutDegree { node, required, actual } => {
-//                 write!(f, "Node {:?} has out-degree {} but {} required", node, actual, required)
-//             }
-//             CopyGlueError::UnsafeCopyingCondition(s) => {
-//                 write!(f, "Unsafe copying condition: {}", s)
-//             }
-//             CopyGlueError::NodeNotInOutput(n) => {
-//                 write!(f, "Node {:?} not in output interface of sub-hypergraph", n)
-//             }
-//             CopyGlueError::InvalidSubhypergraph(s) => {
-//                 write!(f, "Invalid sub-hypergraph: {}", s)
-//             }
-//             CopyGlueError::CategoricalError(e) => write!(f, "Categorical error: {}", e),
-//             CopyGlueError::MorphismError(e) => write!(f, "Morphism error: {}", e),
-//             CopyGlueError::InsufficientInclusions => {
-//                 write!(f, "Glueing requires at least 2 inclusions")
-//             }
-//             CopyGlueError::IncompatibleInclusions(s) => {
-//                 write!(f, "Incompatible inclusions: {}", s)
-//             }
-//         }
-//     }
-// }
+impl From<CategoricalError> for GlueError {
+    fn from(e: CategoricalError) -> Self {
+        GlueError::CategoricalError(e)
+    }
+}
 
-// /// Result of a copying operation
-// #[derive(Debug, Clone)]
-// pub struct CopyResult {
-//     /// The resulting hypergraph with copied sub-hypergraph
-//     pub result: BHyp,
-//     /// Morphism from n copies of T to the result
-//     pub copies_morphism: BHypMorphism,
-//     /// The number of copies created
-//     pub num_copies: usize,
-// }
+impl From<MorphismError> for CopyError {
+    fn from(e: MorphismError) -> Self {
+        CopyError::MorphismError(e)
+    }
+}
 
-// /// Result of a glueing operation  
-// #[derive(Debug, Clone)]
-// pub struct GlueResult {
-//     /// The resulting hypergraph with glued sub-hypergraph
-//     pub result: BHyp,
-//     /// Morphism from the single H to the result
-//     pub glued_morphism: BHypMorphism,
-// }
+impl From<MorphismError> for GlueError {
+    fn from(e: MorphismError) -> Self {
+        GlueError::MorphismError(e)
+    }
+}
 
-// /// Represents a sub-hypergraph T of G with its inclusion morphism
-// #[derive(Debug, Clone)]
-// pub struct Subhypergraph {
-//     /// The sub-hypergraph
-//     pub subgraph: BHyp,
-//     /// Inclusion morphism T -> G
-//     pub inclusion: BHypMorphism,
-//     /// Output interface nodes (in T's node space)
-//     pub output_nodes: HashSet<NodeId>,
-//     /// Input interface nodes (in T's node space)  
-//     pub input_nodes: HashSet<NodeId>,
-// }
+impl std::fmt::Display for CopyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CopyError::NodeNotInOutput(n) => {
+                write!(f, "Node {:?} not in output interface of sub-hypergraph", n)
+            }
+            CopyError::InvalidSubhypergraph(s) => {
+                write!(f, "Invalid sub-hypergraph: {}", s)
+            }
+            CopyError::CategoricalError(e) => write!(f, "Categorical error: {}", e),
+            CopyError::MorphismError(e) => write!(f, "Morphism error: {}", e),
+        }
+    }
+}
 
-// impl Subhypergraph {
-//     /// Create a subhypergraph from a set of edges in G
-//     pub fn from_edges(g: &BHyp, edges: &HashSet<EdgeId>) -> Result<Self, CopyGlueError> {
-//         let mut subgraph = BHyp::new();
-//         let mut g_to_t_nodes: HashMap<NodeId, NodeId> = HashMap::new();
-//         let mut g_to_t_edges: HashMap<EdgeId, EdgeId> = HashMap::new();
-        
-//         // Collect all nodes incident to the edges
-//         let mut incident_nodes: HashSet<NodeId> = HashSet::new();
-//         for &e in edges {
-//             if let Some(swbs) = g.get_sources_with_binding(e) {
-//                 for swb in swbs {
-//                     incident_nodes.insert(swb.source);
-//                     for &b in &swb.bound {
-//                         incident_nodes.insert(b);
-//                     }
-//                 }
-//             }
-//             if let Some(targets) = g.get_targets(e) {
-//                 for &t in targets {
-//                     incident_nodes.insert(t);
-//                 }
-//             }
-//         }
-        
-//         // Create nodes in subgraph
-//         let mut sorted_nodes: Vec<_> = incident_nodes.iter().copied().collect();
-//         sorted_nodes.sort();
-//         for g_n in sorted_nodes {
-//             let t_n = subgraph.add_node();
-//             g_to_t_nodes.insert(g_n, t_n);
-//         }
-        
-//         // Create edges in subgraph
-//         let mut sorted_edges: Vec<_> = edges.iter().copied().collect();
-//         sorted_edges.sort();
-//         for g_e in sorted_edges {
-//             let swbs = g.get_sources_with_binding(g_e).unwrap();
-//             let targets = g.get_targets(g_e).unwrap();
-//             let label = g.get_label(g_e).cloned();
+
+impl std::fmt::Display for GlueError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+           
+            GlueError::InvalidSubhypergraph(s) => {
+                write!(f, "Invalid sub-hypergraph: {}", s)
+            }
+
+            GlueError::CategoricalError(e) => write!(f, "Categorical error: {}", e),
+            GlueError::MorphismError(e) => write!(f, "Morphism error: {}", e),
             
-//             let new_swbs: Vec<SourceWithBinding> = swbs.iter().map(|swb| {
-//                 SourceWithBinding {
-//                     source: g_to_t_nodes[&swb.source],
-//                     bound: swb.bound.iter().map(|&b| g_to_t_nodes[&b]).collect(),
-//                 }
-//             }).collect();
-            
-//             let new_targets: Vec<NodeId> = targets.iter()
-//                 .map(|&t| g_to_t_nodes[&t])
-//                 .collect();
-            
-//             let t_e = subgraph.add_edge(new_swbs, new_targets, label)
-//                 .map_err(|s| CopyGlueError::InvalidSubhypergraph(s))?;
-//             g_to_t_edges.insert(g_e, t_e);
-//         }
-        
-//         // Compute interface nodes
-//         let mut output_nodes = HashSet::new();
-//         let mut input_nodes = HashSet::new();
-        
-//         for (&g_n, &t_n) in &g_to_t_nodes {
-//             // Output: nodes with no outgoing edges within T
-//             let has_outgoing_in_t = subgraph.out_degree(t_n) > 0;
-//             if !has_outgoing_in_t {
-//                 output_nodes.insert(t_n);
-//             }
-            
-//             // Input: nodes with no incoming edges within T and not bound
-//             let has_incoming_in_t = subgraph.in_degree(t_n) > 0;
-//             let is_bound_in_t = subgraph.in_binding_degree(t_n) > 0;
-//             if !has_incoming_in_t && !is_bound_in_t {
-//                 input_nodes.insert(t_n);
-//             }
-//         }
-        
-//         // Build inclusion morphism T -> G
-//         let t_to_g_nodes: HashMap<NodeId, NodeId> = g_to_t_nodes.iter()
-//             .map(|(&g_n, &t_n)| (t_n, g_n))
-//             .collect();
-//         let t_to_g_edges: HashMap<EdgeId, EdgeId> = g_to_t_edges.iter()
-//             .map(|(&g_e, &t_e)| (t_e, g_e))
-//             .collect();
-        
-//         let inclusion = BHypMorphism::new(
-//             subgraph.clone(),
-//             g.clone(),
-//             t_to_g_nodes,
-//             t_to_g_edges,
-//         )?;
-        
-//         Ok(Subhypergraph {
-//             subgraph,
-//             inclusion,
-//             output_nodes,
-//             input_nodes,
-//         })
-//     }
-    
-//     /// Create a subhypergraph containing a single node (discrete)
-//     pub fn discrete_node(g: &BHyp, node: NodeId) -> Result<Self, CopyGlueError> {
-//         if !g.nodes().contains(&node) {
-//             return Err(CopyGlueError::InvalidSubhypergraph(
-//                 format!("Node {:?} not in graph", node)
-//             ));
-//         }
-        
-//         let mut subgraph = BHyp::new();
-//         let t_n = subgraph.add_node();
-        
-//         let inclusion = BHypMorphism::new(
-//             subgraph.clone(),
-//             g.clone(),
-//             [(t_n, node)].into_iter().collect(),
-//             HashMap::new(),
-//         )?;
-        
-//         Ok(Subhypergraph {
-//             subgraph,
-//             inclusion,
-//             output_nodes: [t_n].into_iter().collect(),
-//             input_nodes: [t_n].into_iter().collect(),
-//         })
-//     }
-// }
+            GlueError::IncompatibleInclusions(s) => {
+                write!(f, "Incompatible inclusions: {}", s)
+            }
+        }
+    }
+}
 
-// // ============================================================================
-// // Safe Copying Conditions (Definition 3.11)
-// // ============================================================================
+/// Result of a copying operation
+/// result of the specific pushout complement with projections
+#[derive(Debug, Clone)]
+pub struct CopyResult {
+    /// The resulting hypergraph with copied sub-hypergraph
+    pub result: BHyp,
+    /// morphism onto the original bhyp
+    pub morphism: BHypMorphism,
+    /// The number of copies created
+    pub num_copies: usize,
+}
 
-// /// Check the safe copying conditions from Definition 3.11
-// /// 
-// /// For G ∈ sbHyp, v ∈ G such that out(v) ≥ 2, T is a sub-hypergraph such that:
-// /// 1. ∀e ∈ T, e' ∈ G^i_e : e' ∈ T 
-// ///    (if T contains an edge with a body, the entire body must be in T)
-// /// 2. ∀e' ∈ T, e' ∈ G^i_e, ∃e1 ∈ T, e1 ∉ G^i_e : e ∈ T
-// ///    (when copying part of a body with edges outside, must copy the carrier edge)
-// pub fn check_safe_copying_conditions(
-//     g: &BHyp,
-//     t: &Subhypergraph,
-//     shared_node: NodeId,
-// ) -> Result<(), CopyGlueError> {
-//     // Check that shared_node is in T's output interface
-//     let g_node = t.inclusion.map_node(
-//         *t.output_nodes.iter().find(|&&n| {
-//             t.inclusion.map_node(n) == Some(shared_node)
-//         }).ok_or(CopyGlueError::NodeNotInOutput(shared_node))?
-//     ).unwrap();
+/// Result of a glueing operation  
+/// result of the specific pushout with projections
+#[derive(Debug, Clone)]
+pub struct GlueResult {
+    /// The resulting hypergraph with glued sub-hypergraph
+    pub result: BHyp,
+    /// Morphism from the original onto the glued
+    pub morphism: BHypMorphism,
+}
+
+
+// hypergraph inclusion 
+pub fn build_inclusion(h1: &BHyp, h2: &BHyp) -> Result<BHypMorphism, MorphismError> {
+        let mut node_map = HashMap::new();
+        let mut edge_map = HashMap::new();
+
+        // For a strict inclusion, f(v) = v
+        for &node in h1.nodes() {
+            if h2.nodes().contains(&node) {
+                node_map.insert(node, node);
+            }
+        }
+
+        // For a strict inclusion, f(e) = e
+        for &edge in h1.edges() {
+            if h2.edges().contains(&edge) {
+                edge_map.insert(edge, edge);
+            }
+        }
+
+        BHypMorphism::new(
+            h1.clone(), 
+            h2.clone(),
+            node_map,
+            edge_map
+        )
+}
+
+// ============================================================================
+// Safe Copying Conditions (Definition 3.11)
+// ============================================================================
+
+/// Check the safe copying conditions from Definition 3.11
+/// 
+/// For G ∈ sbHyp, v ∈ G such that out(v) ≥ 2, T is a sub-hypergraph such that:
+/// 1. ∀e ∈ T, e' ∈ G^i_e : e' ∈ T 
+///    (if T contains an edge with a body, the entire body must be in T)
+/// 2. ∀e' ∈ T, e' ∈ G^i_e, ∃e1 ∈ T, e1 ∉ G^i_e : e ∈ T
+///    (when copying part of a body with edges outside, must copy the carrier edge)
+pub fn check_safe_copying_conditions(
+    // ToDo: add test where condition is satisfied and assert result is safe;
+    // add test where condition is violated and assert result is not safe
+    g: &BHyp,
+    t: &BHyp,
+    shared_node: NodeId,
+) -> bool {
+    let t_inclusion = build_inclusion(t, g).unwrap();
+
+    let t_int = BHyp_with_interface::from_bhyp(t.clone());
+    // Get edges in T (in G's edge space)
+    let t_edges_in_g: HashSet<EdgeId> = t_inclusion.edge_image();
     
-//     if g_node != shared_node {
-//         return Err(CopyGlueError::NodeNotInOutput(shared_node));
-//     }
-    
-//     // Check out-degree condition
-//     let out_deg = g.out_degree(shared_node);
-//     if out_deg < 2 {
-//         return Err(CopyGlueError::InsufficientOutDegree {
-//             node: shared_node,
-//             required: 2,
-//             actual: out_deg,
-//         });
-//     }
-    
-//     // Get edges in T (in G's edge space)
-//     let t_edges_in_g: HashSet<EdgeId> = t.inclusion.edge_image();
-    
-//     // Condition 1: If T contains an edge e with a body, the body edges must be in T
-//     for &t_e in t.subgraph.edges() {
-//         let g_e = t.inclusion.map_edge(t_e).unwrap();
+    // Condition 1: If T contains an edge e with a body, the body edges must be in T
+    for &t_e in t.edges() {
+        let g_e = t_inclusion.map_edge(t_e).unwrap();
         
-//         // Check each source that might have a body
-//         if let Some(swbs) = g.get_sources_with_binding(g_e) {
-//             for (i, swb) in swbs.iter().enumerate() {
-//                 if !swb.bound.is_empty() {
-//                     // This source has binding, compute its body
-//                     if let Some(body_edges) = g.compute_body_edges(g_e, i) {
-//                         for &body_e in &body_edges {
-//                             if !t_edges_in_g.contains(&body_e) {
-//                                 return Err(CopyGlueError::UnsafeCopyingCondition(
-//                                     format!(
-//                                         "Edge {:?} in T has body containing edge {:?} not in T",
-//                                         g_e, body_e
-//                                     )
-//                                 ));
-//                             }
-//                         }
-//                     }
-//                 }
-//             }
-//         }
-//     }
+        // Check each source that might have a body
+        if let Some(swbs) = g.get_sources_with_binding(g_e) {
+            for (i, swb) in swbs.iter().enumerate() {
+                if !swb.bound.is_empty() {
+                    // This source has binding, compute its body
+                    if let Some(body_edges) = g.compute_body_edges(g_e, i) {
+                        for &body_e in &body_edges {
+                            if !t_edges_in_g.contains(&body_e) {
+                                return false;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
     
-//     // Condition 2: If T contains edge e' that's in some body G^i_e, and T contains
-//     // edges outside that body, then the carrier edge e must also be in T
-//     for &t_e in t.subgraph.edges() {
-//         let g_e_prime = t.inclusion.map_edge(t_e).unwrap();
+    // Condition 2: If T contains edge e' that's in some body G^i_e, and T contains
+    // edges outside that body, then the carrier edge e must also be in T
+    for &t_e in t.edges() {
+        let g_e_prime = t_inclusion.map_edge(t_e).unwrap();
         
-//         // Check if g_e_prime is in any body
-//         for &carrier_e in g.edges() {
-//             if let Some(swbs) = g.get_sources_with_binding(carrier_e) {
-//                 for (i, swb) in swbs.iter().enumerate() {
-//                     if !swb.bound.is_empty() {
-//                         if let Some(body_edges) = g.compute_body_edges(carrier_e, i) {
-//                             if body_edges.contains(&g_e_prime) {
-//                                 // g_e_prime is in the body of carrier_e at source i
-//                                 // Check if T has edges outside this body
-//                                 let has_edge_outside = t_edges_in_g.iter()
-//                                     .any(|&e| !body_edges.contains(&e) && e != carrier_e);
+        // Check if g_e_prime is in any body
+        for &carrier_e in g.edges() {
+            if let Some(swbs) = g.get_sources_with_binding(carrier_e) {
+                for (i, swb) in swbs.iter().enumerate() {
+                    if !swb.bound.is_empty() {
+                        if let Some(body_edges) = g.compute_body_edges(carrier_e, i) {
+                            if body_edges.contains(&g_e_prime) {
+                                // g_e_prime is in the body of carrier_e at source i
+                                // Check if T has edges outside this body
+                                let has_edge_outside = t_edges_in_g.iter()
+                                    .any(|&e| !body_edges.contains(&e) && e != carrier_e);
                                 
-//                                 if has_edge_outside && !t_edges_in_g.contains(&carrier_e) {
-//                                     return Err(CopyGlueError::UnsafeCopyingCondition(
-//                                         format!(
-//                                             "T contains edge {:?} in body of {:?}, and edges outside, but not the carrier",
-//                                             g_e_prime, carrier_e
-//                                         )
-//                                     ));
-//                                 }
-//                             }
-//                         }
-//                     }
-//                 }
-//             }
-//         }
-//     }
+                                if has_edge_outside && !t_edges_in_g.contains(&carrier_e) {
+                                    return false;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
     
-//     Ok(())
-// }
+    true
+}
 
-// // ============================================================================
-// // Copying (Definition 3.12)
-// // ============================================================================
+fn check_copying_conditions(
+    g: &BHyp,
+    t: &BHyp,
+    shared_node: NodeId,
+) -> Result<(), CopyError> {
+   
+    let t_inclusion = build_inclusion(t, g).unwrap();
 
-// /// Create n copies of a sub-hypergraph T, sharing free vertices
-// /// 
-// /// This creates (n·T)* which is n copies of T glued along their free vertices (input interface).
-// fn create_n_copies_shared(
-//     t: &Subhypergraph,
-//     n: usize,
-// ) -> Result<(BHyp, Vec<BHypMorphism>), CopyGlueError> {
-//     if n == 0 {
-//         return Err(CopyGlueError::InvalidSubhypergraph("Cannot create 0 copies".to_string()));
-//     }
+    let t_int = BHyp_with_interface::from_bhyp(t.clone());
     
-//     if n == 1 {
-//         let id_nodes: HashMap<NodeId, NodeId> = t.subgraph.nodes().iter()
-//             .map(|&n| (n, n)).collect();
-//         let id_edges: HashMap<EdgeId, EdgeId> = t.subgraph.edges().iter()
-//             .map(|&e| (e, e)).collect();
-//         let morphism = BHypMorphism::new(
-//             t.subgraph.clone(),
-//             t.subgraph.clone(),
-//             id_nodes,
-//             id_edges,
-//         )?;
-//         return Ok((t.subgraph.clone(), vec![morphism]));
-//     }
+    // Check that shared_node is in T's output interface
+    if !t_int.is_output(shared_node) {
+        return Err(CopyError::NodeNotInOutput(shared_node));
+    }
+ 
     
-//     // Start with first copy
-//     let mut result = t.subgraph.clone();
-//     let mut morphisms: Vec<BHypMorphism> = Vec::new();
+    Ok(())
     
-//     // First morphism is identity
-//     let first_nodes: HashMap<NodeId, NodeId> = t.subgraph.nodes().iter()
-//         .map(|&n| (n, n)).collect();
-//     let first_edges: HashMap<EdgeId, EdgeId> = t.subgraph.edges().iter()
-//         .map(|&e| (e, e)).collect();
-//     morphisms.push(BHypMorphism::new(
-//         t.subgraph.clone(),
-//         result.clone(),
-//         first_nodes,
-//         first_edges,
-//     )?);
-    
-//     // For copies 2..n, use pushout to glue along input interface
-//     for _copy_idx in 1..n {
-//         // Create discrete input interface
-//         let mut input_interface = BHyp::new();
-//         let mut interface_to_t: HashMap<NodeId, NodeId> = HashMap::new();
-//         let mut interface_to_result: HashMap<NodeId, NodeId> = HashMap::new();
-        
-//         // The input nodes are shared
-//         for &t_input in &t.input_nodes {
-//             let iface_n = input_interface.add_node();
-//             interface_to_t.insert(iface_n, t_input);
-//             // Map to the corresponding node in result (via first morphism)
-//             interface_to_result.insert(iface_n, morphisms[0].map_node(t_input).unwrap());
-//         }
-        
-//         // Morphism from interface to T (new copy)
-//         let iface_to_t = BHypMorphism::new(
-//             input_interface.clone(),
-//             t.subgraph.clone(),
-//             interface_to_t.clone(),
-//             HashMap::new(),
-//         )?;
-        
-//         // Morphism from interface to current result
-//         let iface_to_result = BHypMorphism::new(
-//             input_interface.clone(),
-//             result.clone(),
-//             interface_to_result,
-//             HashMap::new(),
-//         )?;
-        
-//         // Compute pushout to glue the new copy
-//         let pushout = compute_pushout(&iface_to_result, &iface_to_t)?;
-        
-//         // Update result
-//         let old_result = result;
-//         result = pushout.pushout;
-        
-//         // Update existing morphisms to go through the new pushout
-//         for morph in &mut morphisms {
-//             let new_nodes: HashMap<NodeId, NodeId> = morph.on_nodes().iter()
-//                 .map(|(&t_n, &old_r_n)| {
-//                     (t_n, pushout.morphism_from_b.map_node(old_r_n).unwrap())
-//                 })
-//                 .collect();
-//             let new_edges: HashMap<EdgeId, EdgeId> = morph.on_edges().iter()
-//                 .map(|(&t_e, &old_r_e)| {
-//                     (t_e, pushout.morphism_from_b.map_edge(old_r_e).unwrap())
-//                 })
-//                 .collect();
-//             *morph = BHypMorphism::new(
-//                 t.subgraph.clone(),
-//                 result.clone(),
-//                 new_nodes,
-//                 new_edges,
-//             )?;
-//         }
-        
-//         // Add morphism for the new copy
-//         let new_copy_nodes: HashMap<NodeId, NodeId> = t.subgraph.nodes().iter()
-//             .map(|&t_n| (t_n, pushout.morphism_from_c.map_node(t_n).unwrap()))
-//             .collect();
-//         let new_copy_edges: HashMap<EdgeId, EdgeId> = t.subgraph.edges().iter()
-//             .map(|&t_e| (t_e, pushout.morphism_from_c.map_edge(t_e).unwrap()))
-//             .collect();
-//         morphisms.push(BHypMorphism::new(
-//             t.subgraph.clone(),
-//             result.clone(),
-//             new_copy_nodes,
-//             new_copy_edges,
-//         )?);
-//     }
-    
-//     Ok((result, morphisms))
-// }
+}
 
-// /// Perform copying of a shared sub-hypergraph (Definition 3.12)
-// ///
-// /// Given G ∈ sbHyp, v ∈ G with out(v) ≥ 2, and T a safe sub-hypergraph with v ∈ O_T,
-// /// define Ĝ_T (G with copied T) as a pushout complement:
-// ///
-// /// ```text
-// ///     T ←─────── (n·T)*
-// ///     │            │
-// ///     ▼     ⌟      ▼
-// ///     G ←─────── Ĝ_T
-// /// ```
-// ///
-// /// where n = out(v) and (n·T)* is n copies of T sharing free vertices.
-// pub fn copy_subhypergraph(
-//     g: &BHyp,
-//     t: &Subhypergraph,
-//     shared_node: NodeId,
-// ) -> Result<CopyResult, CopyGlueError> {
-//     // Check safe copying conditions
-//     check_safe_copying_conditions(g, t, shared_node)?;
+
+// ============================================================================
+// Copying (Definition 3.12)
+// ============================================================================
+
+/// Create n copies of a sub-hypergraph T, sharing free vertices
+/// 
+/// This creates (n·T)* which is n copies of T glued along their free vertices (input interface).
+/// Also returns morphism projectino onto the single T
+fn compute_n_copies(
+    t: &BHyp,
+    n: usize,
+) -> Result<(BHyp, BHypMorphism), CopyError> {
+    if n == 0 {
+        return Err(CopyError::InvalidSubhypergraph("Cannot create 0 copies".to_string()));
+    }
     
-//     let n = g.out_degree(shared_node);
+    // the result is pushout (T <- K-> (n-1)T) with K the interface
+    if n == 1 {
+        let id_nodes: HashMap<NodeId, NodeId> = t.nodes().iter()
+            .map(|&n| (n, n)).collect();
+        let id_edges: HashMap<EdgeId, EdgeId> = t.edges().iter()
+            .map(|&e| (e, e)).collect();
+        let projection = BHypMorphism::new(
+            t.clone(),
+            t.clone(),
+            id_nodes,
+            id_edges,
+        )?;
+        return Ok((t.clone(), projection));
+    }
+
+    // Start with first copy
+    let mut result = t.clone();
+    let mut res_map = identity_morphism(&result);
+   
+
+    let ti = BHyp_with_interface::from_bhyp(t.clone());
+    let t_input = ti.input_interface();
+    let t_output = ti.output_interface();
+
+    let k = compute_coproduct(t_input, t_output).unwrap().pushout;
+
+    let k_to_t = BHypMorphism::new(
+            k.clone(),
+            t.clone(),
+            ti.combined_interface_map().clone(),
+            HashMap::new(),
+        )?;
     
-//     // Create (n·T)* - n copies sharing free vertices
-//     let (n_copies, copy_morphisms) = create_n_copies_shared(t, n)?;
+    // interface map to the copied stays the same but changes codomain
+    let mut k_to_tn = BHypMorphism::new(
+            k.clone(),
+            result.clone(),
+            ti.combined_interface_map().clone(),
+            HashMap::new(),
+        )?;
+
+    // projection starts as id, then gets composed with the next one
+    let mut projection = identity_morphism(&t);
     
-//     // Build morphism from (n·T)* to G
-//     // Each copy maps to G via the inclusion, but we need to handle the sharing
-//     let n_copies_to_g_nodes: HashMap<NodeId, NodeId> = HashMap::new();
-//     let n_copies_to_g_edges: HashMap<NodeId, EdgeId> = HashMap::new();
+    // For copies 2..n, use pushout to glue along input and output interface
+    for _copy_idx in 1..n {
+
+        let next = compute_pushout(&k_to_t, &k_to_tn).unwrap();
+
+        // update the result and k_to_tn
+        result = next.pushout.clone();
+         
+        k_to_tn = BHypMorphism::new(
+            k.clone(),
+            result.clone(),
+            ti.combined_interface_map().clone(),
+            HashMap::new(),
+        )?;
+
+        // build the projection maps
+        let mut proj_nodes: HashMap<NodeId, NodeId> = HashMap::new();
+        let mut proj_edges: HashMap<EdgeId, EdgeId> = HashMap::new();
+
+    // 1. Invert the nodes map
+    for (&t_id, &result_id) in next.morphism_from_c.on_nodes().iter() {
+        proj_nodes.insert(result_id, t_id);
+    }
     
-//     // For the shared output node (shared_node), all copies map to the same G node
-//     // For non-shared nodes, we need to track which copy goes where
+    for (&t_id, &result_id) in next.morphism_from_b.on_nodes().iter() {
+        // For interface nodes that were glued, `glued_id` is the same for both t1 and t2.
+        // Overwriting is safe because both copies agree that it maps back to the same `t_id`.
+        proj_nodes.insert(result_id, t_id);
+    }
+
+    // 2. Invert the edges map
+    for (&t_id, &glued_id) in next.morphism_from_c.on_edges().iter() {
+        proj_edges.insert(glued_id, t_id);
+    }
     
-//     // This is complex because we need to find n distinct occurrences of T in G
-//     // For now, implement a simpler version that works when T is clearly identifiable
+    for (&t_id, &glued_id) in next.morphism_from_b.on_edges().iter() {
+        proj_edges.insert(glued_id, t_id);
+    }
+
+    // create the projection map 
+    projection = BHypMorphism::new(
+        result.clone(),
+        t.clone(),
+        proj_nodes,
+        proj_edges
+    ).unwrap();
+
+
+        
+    }
+
+    Ok((result, projection))
+}
+
+/// Perform copying of a shared sub-hypergraph (Definition 3.12)
+///
+/// Given G ∈ sbHyp, v ∈ G with out(v) ≥ 2, and T a safe sub-hypergraph with v ∈ O_T,
+/// define Ĝ_T (G with copied T) as a pushout complement:
+///
+/// ```text
+///     T ←─────── (n·T)*
+///     │            │
+///     ▼     ⌟      ▼
+///     G ←─────── Ĝ_T
+/// ```
+///
+/// where n = out(v) and (n·T)* is n copies of T sharing free vertices.
+pub fn copy_subhypergraph(
+    g: &BHyp,
+    t: &BHyp,
+    shared_node: NodeId,
+) -> Result<BHyp, CopyError> {
+    // ToDo test  if n = 1 should equal original bhyp
+    // Check safe copying conditions
+    let incl = build_inclusion(t, g).unwrap();
+    check_copying_conditions(g, t, shared_node)?;
     
-//     // Find all edges that use shared_node as a source
-//     let mut using_edges: Vec<EdgeId> = Vec::new();
-//     for &e in g.edges() {
-//         if let Some(swbs) = g.get_sources_with_binding(e) {
-//             if swbs.iter().any(|swb| swb.source == shared_node) {
-//                 using_edges.push(e);
-//             }
-//         }
-//     }
+    let n = g.out_degree(shared_node);
     
-//     if using_edges.len() < n {
-//         return Err(CopyGlueError::InvalidSubhypergraph(
-//             format!("Expected {} uses of shared node but found {}", n, using_edges.len())
-//         ));
-//     }
+    // Create (n·T)* - n copies sharing free vertices
+    let (n_copies, projection) = compute_n_copies(t, n)?;
     
-//     // Build the result using pushout complement
-//     // We compute: G_T = G ⊔_T (n·T)*
-//     // This is pushout of: T → G and T → (n·T)* (diagonal inclusion into first copy)
+    // Use pushout complement to get result
+    let pushout_complement = compute_pushout_complement(&incl, &projection)?;
     
-//     // Morphism T → (n·T)* (first copy embedding)
-//     let t_to_n_copies = copy_morphisms[0].clone();
-    
-//     // Use pushout to get result
-//     let pushout_result = compute_pushout(&t.inclusion, &t_to_n_copies)?;
-    
-//     // Build the morphism from n·T* to result
-//     let copies_to_result_nodes: HashMap<NodeId, NodeId> = n_copies.nodes().iter()
-//         .map(|&nc_n| (nc_n, pushout_result.morphism_from_c.map_node(nc_n).unwrap()))
-//         .collect();
-//     let copies_to_result_edges: HashMap<EdgeId, EdgeId> = n_copies.edges().iter()
-//         .map(|&nc_e| (nc_e, pushout_result.morphism_from_c.map_edge(nc_e).unwrap()))
-//         .collect();
-    
-//     let copies_morphism = BHypMorphism::new(
-//         n_copies,
-//         pushout_result.pushout.clone(),
-//         copies_to_result_nodes,
-//         copies_to_result_edges,
-//     )?;
-    
-//     Ok(CopyResult {
-//         result: pushout_result.pushout,
-//         copies_morphism,
-//         num_copies: n,
-//     })
-// }
+    Ok(pushout_complement.complement)
+}
+
+
+#[cfg(test)]
+mod copying_tests {
+    use super::*;
+    use crate::bhyp::{BHyp, BHyp_with_interface, Label, SourceWithBinding};
+
+    // ============================================================================
+    // Safe Copying Conditions Tests
+    // ============================================================================
+
+    #[test]
+    fn test_safe_copying_conditions_satisfied() {
+        let mut g = BHyp::new();
+        let n_src = g.add_node();
+        let n_bound = g.add_node();
+        let n_mid = g.add_node();
+        let n_tgt = g.add_node();
+
+        // e1 binds n_bound
+        let _e1 = g.add_edge(
+            vec![SourceWithBinding { source: n_src, bound: vec![n_bound] }],
+            vec![n_mid],
+            Some(Label::Symbol("lambda".to_string())),
+        ).unwrap();
+
+        // e2 is in the body of e1 (because its source is the bound variable)
+        let _e2 = g.add_edge(
+            vec![SourceWithBinding { source: n_bound, bound: vec![] }],
+            vec![n_tgt],
+            Some(Label::Symbol("f".to_string())),
+        ).unwrap();
+
+        // T is the exact same as G (trivially satisfies copying conditions)
+        let t = g.clone();
+        
+        let is_safe = check_safe_copying_conditions(&g, &t, n_mid);
+        assert!(is_safe, "Condition should be satisfied when the body edge is fully included in T");
+    }
+
+    #[test]
+    fn test_safe_copying_conditions_violated() {
+        let mut g = BHyp::new();
+        let n_src = g.add_node();
+        let n_bound = g.add_node();
+        let n_mid = g.add_node();
+        let n_tgt = g.add_node();
+
+        let _e1 = g.add_edge(
+            vec![SourceWithBinding { source: n_src, bound: vec![n_bound] }],
+            vec![n_mid],
+            Some(Label::Symbol("lambda".to_string())),
+        ).unwrap();
+
+        let e2 = g.add_edge(
+            vec![SourceWithBinding { source: n_bound, bound: vec![] }],
+            vec![n_tgt],
+            Some(Label::Symbol("f".to_string())),
+        ).unwrap();
+
+        // We want T to contain e1, but NOT e2. 
+        // This violates Condition 1: if T has e1, it must contain e1's entire body.
+        let mut t_int = BHyp_with_interface::from_bhyp(g.clone());
+        t_int.remove_edge(e2).unwrap();
+        t_int.remove_node(n_tgt).unwrap();
+        
+        let t = t_int.bhyp().clone();
+
+        let is_safe = check_safe_copying_conditions(&g, &t, n_mid);
+        assert!(!is_safe, "Condition must be violated because e2 (part of e1's body) is missing from T");
+    }
+
+    // ============================================================================
+    // Sub-hypergraph Copying Tests
+    // ============================================================================
+
+    #[test]
+    fn test_copy_subhypergraph_n_equals_1() {
+        let mut g = BHyp::new();
+        let n1 = g.add_node();
+        let shared_node = g.add_node();
+        let n3 = g.add_node();
+
+        // Part inside T
+        let _e1 = g.add_edge(
+            vec![SourceWithBinding { source: n1, bound: vec![] }], 
+            vec![shared_node], 
+            None
+        ).unwrap();
+        
+        // Part outside T (This gives shared_node an out-degree of 1 in G)
+        let e2 = g.add_edge(
+            vec![SourceWithBinding { source: shared_node, bound: vec![] }], 
+            vec![n3], 
+            None
+        ).unwrap();
+
+        // T is just n1 -> shared_node
+        let mut t_int = BHyp_with_interface::from_bhyp(g.clone());
+        t_int.remove_edge(e2).unwrap();
+        t_int.remove_node(n3).unwrap();
+        
+        let t = t_int.bhyp().clone();
+
+        // Sanity check: In G, shared_node has out_degree = 1. So n = 1.
+        assert_eq!(g.out_degree(shared_node), 1);
+
+        // Perform the copy
+        let result = copy_subhypergraph(&g, &t, shared_node).expect("Copy operation failed");
+
+        // When n = 1, the pushout complement should yield a graph isomorphic/identical to the original G.
+        assert_eq!(result.nodes().len(), g.nodes().len(), "Result should have the same number of nodes as G");
+        assert_eq!(result.edges().len(), g.edges().len(), "Result should have the same number of edges as G");
+    }
+
+    #[test]
+    fn test_compute_n_copies_multiple() {
+        // Create a simple graph T: (n_in) -> (n_out)
+        let mut t = BHyp::new();
+        let n_in = t.add_node();
+        let n_out = t.add_node();
+        
+        t.add_edge(
+            vec![SourceWithBinding { source: n_in, bound: vec![] }],
+            vec![n_out],
+            Some(Label::Symbol("e".to_string()))
+        ).unwrap();
+        t.add_edge(
+            vec![SourceWithBinding { source: n_in, bound: vec![] }],
+            vec![n_out],
+            Some(Label::Symbol("e".to_string()))
+        ).unwrap();
+        t.add_edge(
+            vec![SourceWithBinding { source: n_in, bound: vec![] }],
+            vec![n_out],
+            Some(Label::Symbol("e".to_string()))
+        ).unwrap();
+
+        let n = 3;
+        let (result_bhyp, _) = compute_n_copies(&t, n).unwrap();
+        
+        // Because n_in and n_out are interfaces, they act as the glue points.
+        // 3 copies glued at the interface means the resulting graph has exactly 
+        // 2 nodes (the shared interfaces) and 3 parallel edges.
+        assert_eq!(result_bhyp.nodes().len(), 2, "Copies should share the interface vertices");
+        assert_eq!(result_bhyp.edges().len(), 3, "There should be exactly 3 edges from the 3 copies");
+    }
+
+    #[test]
+    fn test_copying_fails_when_node_not_in_output() {
+        let mut g = BHyp::new();
+        let n1 = g.add_node();
+        let n2 = g.add_node();
+
+        // Edge goes from n1 -> n2
+        g.add_edge(
+            vec![SourceWithBinding { source: n1, bound: vec![] }], 
+            vec![n2], 
+            None
+        ).unwrap();
+
+        let t = g.clone();
+        
+        // n1 is the source (in_degree = 0, out_degree = 1).
+        // It is NOT in the output interface of T.
+        let result = copy_subhypergraph(&g, &t, n1);
+        
+        assert!(
+            matches!(result, Err(CopyError::NodeNotInOutput(_))),
+            "Should return a NodeNotInOutput error because n1 is not in T's output interface"
+        );
+    }
+}
+
 
 // // ============================================================================
 // // Glueing (Definition 3.15)
