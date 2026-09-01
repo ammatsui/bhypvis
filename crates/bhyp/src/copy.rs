@@ -549,12 +549,14 @@ pub fn copy_subhypergraph(
     
     let k_node = shared_node.middle.nodes().iter().next().unwrap();
     let n = g.out_degree(shared_node.clone().to_r.map_node(*k_node).unwrap());
+
+    assert!(n > 0);
     
     // Create (n·T)* - n copies sharing free vertices
     let (n_copies, projection) = compute_n_copies(t, n)?;
     
     // Use pushout complement to get result
-    let pushout_complement = compute_pushout_complement(&incl, &projection)?;
+    let pushout_complement = compute_pushout_complement(&projection, &incl)?;
     
     Ok(pushout_complement.complement)
 }
