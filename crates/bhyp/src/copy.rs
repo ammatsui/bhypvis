@@ -118,6 +118,122 @@ pub struct GlueResult {
 }
 
 
+//// i think that could be moved to categorical.rs
+
+/// Finds all monomorphic inclusions (occurrences) of pattern H in target G.
+pub fn find_all_ccurrences(pattern: &BHyp, target: &BHyp) -> Vec<BHypMorphism> {
+    let mut results = Vec::new();
+    let pattern_edges: Vec<EdgeId> = pattern.edges().iter().copied().collect();
+    
+    let mut node_map = HashMap::new();
+    let mut edge_map = HashMap::new();
+    
+    backtrack_match(
+        0,
+        &pattern_edges,
+        pattern,
+        target,
+        &mut node_map,
+        &mut edge_map,
+        &mut results,
+    );
+    
+    results
+}
+
+fn backtrack_match(
+    edge_idx: usize,
+    pattern_edges: &[EdgeId],
+    pattern: &BHyp,
+    target: &BHyp,
+    current_node_map: &mut HashMap<NodeId, NodeId>,
+    current_edge_map: &mut HashMap<EdgeId, EdgeId>,
+    results: &mut Vec<BHypMorphism>,
+) {
+    // Base Case: All edges matched
+    if edge_idx == pattern_edges.len() {
+        // (Assuming no isolated nodes in H. If H has isolated nodes, you'd 
+        // need a secondary loop here to map remaining unmapped nodes in pattern.nodes())
+        if let Ok(m) = BHypMorphism::new(
+            pattern.clone(), 
+            target.clone(), 
+            current_node_map.clone(), 
+            current_edge_map.clone()
+        ) {
+            results.push(m);
+        }
+        return;
+    }
+
+    let p_edge = pattern_edges[edge_idx];
+    
+    for &t_edge in target.edges() {
+        // 1. Check Label
+        if pattern.get_label(p_edge) != target.get_label(t_edge) { continue; }
+        
+        // 2. Prevent mapping multiple pattern edges to the same target edge
+        if current_edge_map.values().any(|&e| e == t_edge) { continue; }
+        
+        let p_sources = pattern.get_sources_with_binding(p_edge).unwrap();
+        let p_targets = pattern.get_targets(p_edge).unwrap();
+        
+        let t_sources = target.get_sources_with_binding(t_edge).unwrap();
+        let t_targets = target.get_targets(t_edge).unwrap();
+        
+        // 3. Arity and Co-arity must match
+        if p_sources.len() != t_sources.len() || p_targets.len() != t_targets.len() { continue; }
+        
+        let mut local_node_additions = Vec::new();
+        let mut valid = true;
+        
+        // Helper to enforce injectivity while mapping nodes
+        let mut try_map_node = |p_n: NodeId, t_n: NodeId| -> bool {
+            if let Some(&existing) = current_node_map.get(&p_n) {
+                existing == t_n // Must agree with previous mappings
+            } else {
+                // Must be injective: target node can't already be mapped to a different pattern node
+                if current_node_map.values().any(|&n| n == t_n) {
+                    return false;
+                }
+                current_node_map.insert(p_n, t_n);
+                local_node_additions.push(p_n);
+                true
+            }
+        };
+        
+        // 4. Map Targets
+        for (i, &p_n) in p_targets.iter().enumerate() {
+            if !try_map_node(p_n, t_targets[i]) { valid = false; break; }
+        }
+        
+        // 5. Map Sources and Bindings
+        if valid {
+            for (i, p_swb) in p_sources.iter().enumerate() {
+                let t_swb = &t_sources[i];
+                if p_swb.bound.len() != t_swb.bound.len() { valid = false; break; }
+                
+                if !try_map_node(p_swb.source, t_swb.source) { valid = false; break; }
+                
+                for (j, &p_b) in p_swb.bound.iter().enumerate() {
+                    if !try_map_node(p_b, t_swb.bound[j]) { valid = false; break; }
+                }
+                if !valid { break; }
+            }
+        }
+        
+        // 6. Recurse if valid
+        if valid {
+            current_edge_map.insert(p_edge, t_edge);
+            backtrack_match(edge_idx + 1, pattern_edges, pattern, target, current_node_map, current_edge_map, results);
+            current_edge_map.remove(&p_edge);
+        }
+        
+        // 7. Backtrack (undo local mappings)
+        for p_n in local_node_additions {
+            current_node_map.remove(&p_n);
+        }
+    }
+}
 
 
 /// Check if T is a subhypergraph of G, and if so return the inclusion morphism
@@ -261,8 +377,6 @@ pub fn find_subhypergraph_inclusion(t: &BHyp, g: &BHyp) -> Option<BHypMorphism> 
 pub fn is_subhypergraph(t: &BHyp, g: &BHyp) -> bool {
     find_subhypergraph_inclusion(t, g).is_some()
 }
-
-
 
 
 
@@ -420,6 +534,7 @@ fn check_copying_conditions(
 /// This creates (n·T)* which is n copies of T glued along their free vertices (input interface).
 /// Also returns morphism projectino onto the single T
 fn compute_n_copies(
+    // ToDo: add optional interface paremeter (input interface by default) for glueing
     t: &BHyp,
     n: usize,
 ) -> Result<(BHyp, BHypMorphism), CopyError> {
@@ -1016,159 +1131,175 @@ mod copying_tests {
 }
 
 
-// // ============================================================================
-// // Glueing (Definition 3.15)
-// // ============================================================================
+// ============================================================================
+// Glueing (Definition 3.15)
+// ============================================================================
 
-// /// Perform glueing of multiple inclusions of H in G (Definition 3.15)
-// ///
-// /// Given H, G ∈ sbHyp and different inclusions m1: H ↪ G, ..., mn: H ↪ G,
-// /// the result of glueing H in G is obtained as pushout: PO(G ← n·H → H)
-// ///
-// /// ```text
-// ///     n·H ←────── H
-// ///      │          │
-// ///      ▼    ⌟     ▼
-// ///      G ←────── Ĝ
-// /// ```
-// pub fn glue_subhypergraph(
-//     g: &BHyp,
-//     h: &BHyp,
-//     inclusions: &[BHypMorphism],
-// ) -> Result<GlueResult, CopyGlueError> {
-//     if inclusions.len() < 2 {
-//         return Err(CopyGlueError::InsufficientInclusions);
-//     }
+/// Perform glueing of multiple inclusions of H in G (Definition 3.15)
+///
+/// Given H, G ∈ sbHyp and different inclusions m1: H ↪ G, ..., mn: H ↪ G,
+/// the result of glueing H in G is obtained as pushout: PO(G ← n·H → H)
+///
+/// ```text
+///     n·H ←────── H
+///      │          │
+///      ▼    ⌟     ▼
+///      G ←────── Ĝ
+/// ```
+
+
+pub fn glue_subhypergraph(
+    g: &BHyp,
+    h: &BHyp
+) -> Result<GlueResult, GlueError> {
+    // find n, n inclusions --> that's also useful later for metavar extraction
+    let inclusions = find_all_ccurrences(h, g);
+
+    let n = inclusions.len();
+    if n == 0 {
+         return Err(GlueError::InvalidSubhypergraph("Not a subhypergraph!".to_string()));
+    }
+
+    // todo add optionsl interface parameter
+    // build projection n H -> H
+    let (nH, proj) = compute_n_copies(h, n).unwrap();
+    // build inclusion n H -> G
+    let incl = build_inclusion(&nH, g).unwrap();
+    // build pushout (G <- n H -> H)
+    let pushout_res = compute_pushout(&incl, &proj)?;
+
+    Ok(GlueResult {
+        result: pushout_res.pushout,
+        morphism: pushout_res.morphism_from_b, 
+    })
     
-//     // Verify all inclusions are valid monomorphisms from H to G
-//     for (i, inc) in inclusions.iter().enumerate() {
-//         if !inc.is_monomorphism() {
-//             return Err(CopyGlueError::IncompatibleInclusions(
-//                 format!("Inclusion {} is not a monomorphism", i)
-//             ));
-//         }
-//         // Check domain is H and codomain is G
-//         if inc.domain().nodes() != h.nodes() || inc.domain().edges() != h.edges() {
-//             return Err(CopyGlueError::IncompatibleInclusions(
-//                 format!("Inclusion {} has wrong domain", i)
-//             ));
-//         }
-//         if inc.codomain().nodes() != g.nodes() || inc.codomain().edges() != g.edges() {
-//             return Err(CopyGlueError::IncompatibleInclusions(
-//                 format!("Inclusion {} has wrong codomain", i)
-//             ));
-//         }
-//     }
     
-//     let n = inclusions.len();
+}
+
+
+
+#[cfg(test)]
+mod glueing_tests {
+    use super::*;
+    use crate::{bhyp::{BHyp, BHyp_with_interface, Label, SourceWithBinding}, categorical::are_isomorphic};
     
-//     // Create n·H (n disjoint copies of H)
-//     let mut n_h = BHyp::new();
-//     let mut copy_nodes: Vec<HashMap<NodeId, NodeId>> = Vec::new();
-//     let mut copy_edges: Vec<HashMap<EdgeId, EdgeId>> = Vec::new();
-    
-//     for _ in 0..n {
-//         let mut h_to_nh_nodes = HashMap::new();
-//         let mut h_to_nh_edges = HashMap::new();
+
+    #[test]
+    pub fn find_all_occurence() {
         
-//         // Add nodes for this copy
-//         let mut sorted_nodes: Vec<_> = h.nodes().iter().copied().collect();
-//         sorted_nodes.sort();
-//         for h_n in sorted_nodes {
-//             let nh_n = n_h.add_node();
-//             h_to_nh_nodes.insert(h_n, nh_n);
-//         }
+    }
+
+
+    #[test]
+    pub fn glue_one_occurence() {
         
-//         // Add edges for this copy
-//         let mut sorted_edges: Vec<_> = h.edges().iter().copied().collect();
-//         sorted_edges.sort();
-//         for h_e in sorted_edges {
-//             let swbs = h.get_sources_with_binding(h_e).unwrap();
-//             let targets = h.get_targets(h_e).unwrap();
-//             let label = h.get_label(h_e).cloned();
-            
-//             let new_swbs: Vec<SourceWithBinding> = swbs.iter().map(|swb| {
-//                 SourceWithBinding {
-//                     source: h_to_nh_nodes[&swb.source],
-//                     bound: swb.bound.iter().map(|&b| h_to_nh_nodes[&b]).collect(),
-//                 }
-//             }).collect();
-//             let new_targets: Vec<NodeId> = targets.iter()
-//                 .map(|&t| h_to_nh_nodes[&t])
-//                 .collect();
-            
-//             let nh_e = n_h.add_edge(new_swbs, new_targets, label)
-//                 .map_err(|s| CopyGlueError::InvalidSubhypergraph(s))?;
-//             h_to_nh_edges.insert(h_e, nh_e);
-//         }
+    }
+
+    #[test]
+    pub fn glue_simple_subhyp() {
+        // Create a simple graph T: (n_in) -> (n_out)
+        let mut t = BHyp::new();
+        let n_in = t.add_node();
+        let n_out = t.add_node();
         
-//         copy_nodes.push(h_to_nh_nodes);
-//         copy_edges.push(h_to_nh_edges);
-//     }
-    
-//     // Build morphism n·H → G using the inclusions
-//     let mut nh_to_g_nodes: HashMap<NodeId, NodeId> = HashMap::new();
-//     let mut nh_to_g_edges: HashMap<EdgeId, EdgeId> = HashMap::new();
-    
-//     for (i, inc) in inclusions.iter().enumerate() {
-//         for (&h_n, &nh_n) in &copy_nodes[i] {
-//             nh_to_g_nodes.insert(nh_n, inc.map_node(h_n).unwrap());
-//         }
-//         for (&h_e, &nh_e) in &copy_edges[i] {
-//             nh_to_g_edges.insert(nh_e, inc.map_edge(h_e).unwrap());
-//         }
-//     }
-    
-//     let nh_to_g = BHypMorphism::new(
-//         n_h.clone(),
-//         g.clone(),
-//         nh_to_g_nodes,
-//         nh_to_g_edges,
-//     )?;
-    
-//     // Build morphism n·H → H (fold all copies to single H)
-//     let mut nh_to_h_nodes: HashMap<NodeId, NodeId> = HashMap::new();
-//     let mut nh_to_h_edges: HashMap<EdgeId, EdgeId> = HashMap::new();
-    
-//     for i in 0..n {
-//         for (&h_n, &nh_n) in &copy_nodes[i] {
-//             nh_to_h_nodes.insert(nh_n, h_n);
-//         }
-//         for (&h_e, &nh_e) in &copy_edges[i] {
-//             nh_to_h_edges.insert(nh_e, h_e);
-//         }
-//     }
-    
-//     let nh_to_h = BHypMorphism::new(
-//         n_h.clone(),
-//         h.clone(),
-//         nh_to_h_nodes,
-//         nh_to_h_edges,
-//     )?;
-    
-//     // Compute pushout: PO(G ← n·H → H)
-//     let pushout_result = compute_pushout(&nh_to_g, &nh_to_h)?;
-    
-//     // The glued morphism is H → result
-//     let glued_nodes: HashMap<NodeId, NodeId> = h.nodes().iter()
-//         .map(|&h_n| (h_n, pushout_result.morphism_from_c.map_node(h_n).unwrap()))
-//         .collect();
-//     let glued_edges: HashMap<EdgeId, EdgeId> = h.edges().iter()
-//         .map(|&h_e| (h_e, pushout_result.morphism_from_c.map_edge(h_e).unwrap()))
-//         .collect();
-    
-//     let glued_morphism = BHypMorphism::new(
-//         h.clone(),
-//         pushout_result.pushout.clone(),
-//         glued_nodes,
-//         glued_edges,
-//     )?;
-    
-//     Ok(GlueResult {
-//         result: pushout_result.pushout,
-//         glued_morphism,
-//     })
-// }
+        t.add_edge(
+            vec![SourceWithBinding { source: n_in, bound: vec![] }],
+            vec![n_out],
+            Some(Label::Symbol("e".to_string()))
+        ).unwrap();
+
+        // create the graph with multiple t
+        let mut exp = BHyp::new();
+
+        let t_in = exp.add_node();
+
+        let x1 = exp.add_node();
+        let x2 = exp.add_node();
+        let x3 = exp.add_node();
+
+        let y1 = exp.add_node();
+        let y2 = exp.add_node();
+        let y3 = exp.add_node();
+        
+        exp.add_edge(
+            vec![SourceWithBinding { source: t_in, bound: vec![] }],
+            vec![y1],
+            Some(Label::Symbol("e".to_string()))
+        ).unwrap();
+        exp.add_edge(
+            vec![SourceWithBinding { source: t_in, bound: vec![] }],
+            vec![y2],
+            Some(Label::Symbol("e".to_string()))
+        ).unwrap();
+        exp.add_edge(
+            vec![SourceWithBinding { source: t_in, bound: vec![] }],
+            vec![y3],
+            Some(Label::Symbol("e".to_string()))
+        ).unwrap();
+
+        exp.add_edge(
+            vec![SourceWithBinding { source: y1, bound: vec![] }],
+            vec![x1],
+            Some(Label::Symbol("f1".to_string()))
+        ).unwrap();
+        exp.add_edge(
+            vec![SourceWithBinding { source: y2, bound: vec![] }],
+            vec![x2],
+            Some(Label::Symbol("f2".to_string()))
+        ).unwrap();
+        exp.add_edge(
+            vec![SourceWithBinding { source: y3, bound: vec![] }],
+            vec![x3],
+            Some(Label::Symbol("f3".to_string()))
+        ).unwrap();
+
+       // glue
+       let res = glue_subhypergraph(&exp, &t).unwrap();
+
+       assert_eq!(res.result.edges().len(), 4);
+       assert_eq!(res.result.nodes().len(), 5);
+
+       // create g containing sharing of T
+        let mut g = BHyp::new();
+        let t_in = g.add_node();
+        let t_out = g.add_node();
+
+        let x1 = g.add_node();
+        let x2 = g.add_node();
+        let x3 = g.add_node();
+        
+        g.add_edge(
+            vec![SourceWithBinding { source: t_in, bound: vec![] }],
+            vec![t_out],
+            Some(Label::Symbol("e".to_string()))
+        ).unwrap();
+        g.add_edge(
+            vec![SourceWithBinding { source: t_out, bound: vec![] }],
+            vec![x1],
+            Some(Label::Symbol("f1".to_string()))
+        ).unwrap();
+        g.add_edge(
+            vec![SourceWithBinding { source: t_out, bound: vec![] }],
+            vec![x2],
+            Some(Label::Symbol("f2".to_string()))
+        ).unwrap();
+        g.add_edge(
+            vec![SourceWithBinding { source: t_out, bound: vec![] }],
+            vec![x3],
+            Some(Label::Symbol("f3".to_string()))
+        ).unwrap();
+
+        assert!(are_isomorphic(&g, &res.result));
+
+
+    }
+
+    #[test]
+    pub fn copy_glue_roundtrip() {
+        
+    }
+   
+}
 
 // // ============================================================================
 // // Equality modulo copying/glueing (Definition 3.16)
