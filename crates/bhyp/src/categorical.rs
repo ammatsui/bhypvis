@@ -448,6 +448,316 @@ pub struct PushoutComplementResult {
     pub morphism_to_g: BHypMorphism,
 }
 
+///////////////////
+/// morphisms and inclusions
+/// ///////////////
+//// i think that could be moved to categorical.rs
+
+/// Finds all monomorphic inclusions (occurrences) of pattern H in target G.
+pub fn find_all_ccurrences(pattern: &BHyp, target: &BHyp) -> Vec<BHypMorphism> {
+    let mut results = Vec::new();
+    let pattern_edges: Vec<EdgeId> = pattern.edges().iter().copied().collect();
+    
+    let mut node_map = HashMap::new();
+    let mut edge_map = HashMap::new();
+    
+    backtrack_match(
+        0,
+        &pattern_edges,
+        pattern,
+        target,
+        &mut node_map,
+        &mut edge_map,
+        &mut results,
+    );
+    
+    results
+}
+
+fn backtrack_match(
+    edge_idx: usize,
+    pattern_edges: &[EdgeId],
+    pattern: &BHyp,
+    target: &BHyp,
+    current_node_map: &mut HashMap<NodeId, NodeId>,
+    current_edge_map: &mut HashMap<EdgeId, EdgeId>,
+    results: &mut Vec<BHypMorphism>,
+) {
+    // Base Case: All edges matched
+    if edge_idx == pattern_edges.len() {
+        // (Assuming no isolated nodes in H. If H has isolated nodes, you'd 
+        // need a secondary loop here to map remaining unmapped nodes in pattern.nodes())
+        if let Ok(m) = BHypMorphism::new(
+            pattern.clone(), 
+            target.clone(), 
+            current_node_map.clone(), 
+            current_edge_map.clone()
+        ) {
+            results.push(m);
+        }
+        return;
+    }
+
+    let p_edge = pattern_edges[edge_idx];
+    
+    for &t_edge in target.edges() {
+        // 1. Check Label
+        if pattern.get_label(p_edge) != target.get_label(t_edge) { continue; }
+        
+        // 2. Prevent mapping multiple pattern edges to the same target edge
+        if current_edge_map.values().any(|&e| e == t_edge) { continue; }
+        
+        let p_sources = pattern.get_sources_with_binding(p_edge).unwrap();
+        let p_targets = pattern.get_targets(p_edge).unwrap();
+        
+        let t_sources = target.get_sources_with_binding(t_edge).unwrap();
+        let t_targets = target.get_targets(t_edge).unwrap();
+        
+        // 3. Arity and Co-arity must match
+        if p_sources.len() != t_sources.len() || p_targets.len() != t_targets.len() { continue; }
+        
+        let mut local_node_additions = Vec::new();
+        let mut valid = true;
+        
+        // Helper to enforce injectivity while mapping nodes
+        let mut try_map_node = |p_n: NodeId, t_n: NodeId| -> bool {
+            if let Some(&existing) = current_node_map.get(&p_n) {
+                existing == t_n // Must agree with previous mappings
+            } else {
+                // Must be injective: target node can't already be mapped to a different pattern node
+                if current_node_map.values().any(|&n| n == t_n) {
+                    return false;
+                }
+                current_node_map.insert(p_n, t_n);
+                local_node_additions.push(p_n);
+                true
+            }
+        };
+        
+        // 4. Map Targets
+        for (i, &p_n) in p_targets.iter().enumerate() {
+            if !try_map_node(p_n, t_targets[i]) { valid = false; break; }
+        }
+        
+        // 5. Map Sources and Bindings
+        if valid {
+            for (i, p_swb) in p_sources.iter().enumerate() {
+                let t_swb = &t_sources[i];
+                if p_swb.bound.len() != t_swb.bound.len() { valid = false; break; }
+                
+                if !try_map_node(p_swb.source, t_swb.source) { valid = false; break; }
+                
+                for (j, &p_b) in p_swb.bound.iter().enumerate() {
+                    if !try_map_node(p_b, t_swb.bound[j]) { valid = false; break; }
+                }
+                if !valid { break; }
+            }
+        }
+        
+        // 6. Recurse if valid
+        if valid {
+            current_edge_map.insert(p_edge, t_edge);
+            backtrack_match(edge_idx + 1, pattern_edges, pattern, target, current_node_map, current_edge_map, results);
+            current_edge_map.remove(&p_edge);
+        }
+        
+        // 7. Backtrack (undo local mappings)
+        for p_n in local_node_additions {
+            current_node_map.remove(&p_n);
+        }
+    }
+}
+
+
+/// Check if T is a subhypergraph of G, and if so return the inclusion morphism
+pub fn find_subhypergraph_inclusion(t: &BHyp, g: &BHyp) -> Option<BHypMorphism> {
+    // T can only be a subhypergraph if it has at most as many nodes and edges as G
+    if t.nodes().len() > g.nodes().len() || t.edges().len() > g.edges().len() {
+        return None;
+    }
+
+    let t_nodes: Vec<NodeId> = t.nodes().iter().copied().collect();
+    let g_nodes: Vec<NodeId> = g.nodes().iter().copied().collect();
+
+    // Empty T is always a subhypergraph of G
+    if t_nodes.is_empty() && t.edges().is_empty() {
+        return Some(BHypMorphism::new(
+            t.clone(), g.clone(), HashMap::new(), HashMap::new()
+        ).unwrap());
+    }
+
+    // For small graphs, try all possible injective mappings from T to G
+    fn try_inclusion(
+        t: &BHyp,
+        g: &BHyp,
+        t_nodes: &[NodeId],
+        g_nodes: &[NodeId],
+        node_map: &mut HashMap<NodeId, NodeId>,
+        idx: usize,
+        used: &mut HashSet<NodeId>,
+    ) -> Option<HashMap<EdgeId, EdgeId>> {
+        if idx == t_nodes.len() {
+            // Check if this node mapping induces a valid edge inclusion
+            let mut edge_map: HashMap<EdgeId, EdgeId> = HashMap::new();
+
+            for &e_t in t.edges() {
+                let mut found = false;
+                for &e_g in g.edges() {
+                    if edge_map.values().any(|&e| e == e_g) {
+                        continue;
+                    }
+
+                    // Check compatibility
+                    let swbs_t = t.get_sources_with_binding(e_t).unwrap();
+                    let swbs_g = g.get_sources_with_binding(e_g).unwrap();
+                    let targets_t = t.get_targets(e_t).unwrap();
+                    let targets_g = g.get_targets(e_g).unwrap();
+
+                    if swbs_t.len() != swbs_g.len() || targets_t.len() != targets_g.len() {
+                        continue;
+                    }
+
+                    let mut compatible = true;
+
+                    // Check sources and bindings
+                    for (s_t, s_g) in swbs_t.iter().zip(swbs_g.iter()) {
+                        if node_map[&s_t.source] != s_g.source {
+                            compatible = false;
+                            break;
+                        }
+                        if s_t.bound.len() != s_g.bound.len() {
+                            compatible = false;
+                            break;
+                        }
+                        for (b_t, b_g) in s_t.bound.iter().zip(s_g.bound.iter()) {
+                            if node_map[b_t] != *b_g {
+                                compatible = false;
+                                break;
+                            }
+                        }
+                        if !compatible {
+                            break;
+                        }
+                    }
+
+                    if !compatible {
+                        continue;
+                    }
+
+                    // Check targets
+                    for (t_t, t_g) in targets_t.iter().zip(targets_g.iter()) {
+                        if node_map[t_t] != *t_g {
+                            compatible = false;
+                            break;
+                        }
+                    }
+
+                    if !compatible {
+                        continue;
+                    }
+
+                    // Check labels
+                    if t.get_label(e_t) != g.get_label(e_g) {
+                        continue;
+                    }
+
+                    edge_map.insert(e_t, e_g);
+                    found = true;
+                    break;
+                }
+
+                if !found {
+                    return None;
+                }
+            }
+
+            return Some(edge_map);
+        }
+
+        let n_t = t_nodes[idx];
+        for &n_g in g_nodes {
+            if used.contains(&n_g) {
+                continue;
+            }
+
+            node_map.insert(n_t, n_g);
+            used.insert(n_g);
+
+            if let Some(edge_map) = try_inclusion(t, g, t_nodes, g_nodes, node_map, idx + 1, used) {
+                return Some(edge_map);
+            }
+
+            node_map.remove(&n_t);
+            used.remove(&n_g);
+        }
+
+        None
+    }
+
+    let mut node_map = HashMap::new();
+    let mut used = HashSet::new();
+
+    if let Some(edge_map) = try_inclusion(t, g, &t_nodes, &g_nodes, &mut node_map, 0, &mut used) {
+        Some(BHypMorphism::new(
+            t.clone(), g.clone(), node_map, edge_map
+        ).unwrap())
+    } else {
+        None
+    }
+}
+
+/// Check if T is a subhypergraph of G (without returning the morphism)
+pub fn is_subhypergraph(t: &BHyp, g: &BHyp) -> bool {
+    find_subhypergraph_inclusion(t, g).is_some()
+}
+
+
+
+
+
+// hypergraph inclusion 
+pub fn build_inclusion(t: &BHyp, g: &BHyp) -> Result<BHypMorphism, MorphismError> {
+    if is_subhypergraph(&t, &g) {
+        
+        let option = find_subhypergraph_inclusion(&t, &g);
+
+// Converts Some(bhyp) -> Ok(bhyp)
+// Converts None -> Err(CopyError::InvalidSubhypergraph(...))
+    let result = option.ok_or(
+    MorphismError::DomainMismatch
+);   
+return result
+    }
+
+    return Err(MorphismError::DomainMismatch);
+
+    
+        // let mut node_map = HashMap::new();
+        // let mut edge_map = HashMap::new();
+
+        // // For a strict inclusion, f(v) = v
+        // for &node in h1.nodes() {
+        //     if h2.nodes().contains(&node) {
+        //         node_map.insert(node, node);
+        //     }
+        // }
+
+        // // For a strict inclusion, f(e) = e
+        // for &edge in h1.edges() {
+        //     if h2.edges().contains(&edge) {
+        //         edge_map.insert(edge, edge);
+        //     }
+        // }
+
+        // BHypMorphism::new(
+        //     h1.clone(), 
+        //     h2.clone(),
+        //     node_map,
+        //     edge_map
+        // )
+}
+
+
 // ============================================================================
 // Union-Find helpers
 // ============================================================================
