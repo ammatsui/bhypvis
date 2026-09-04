@@ -585,6 +585,17 @@ impl BHyp_with_interface {
         self.output_map.values().copied().collect()
     }
 
+    /// Get the input interface nodes as a set of NodeIds (from the main bhyp)
+    pub fn combined_interface_nodes(&self) -> HashSet<NodeId> {
+        let combined: HashMap<NodeId, NodeId> = self.input_map()
+    .iter()
+    .chain(self.output_map().iter())
+    .map(|(&k, &v)| (k, v)) // Dereference the borrowed keys and values
+    .collect();
+        
+        combined.values().copied().collect()
+    }
+
     /// Get the mapping from input interface nodes to bhyp nodes
     pub fn input_map(&self) -> &HashMap<NodeId, NodeId> {
         &self.input_map
