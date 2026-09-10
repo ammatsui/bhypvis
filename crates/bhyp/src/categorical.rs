@@ -1136,7 +1136,6 @@ pub fn compute_pullback(
 // ============================================================================
 // Pushout Complement
 // ============================================================================
-
 pub fn compute_pushout_complement(
     l: &BHypMorphism, // l: K -> L
     m: &BHypMorphism, // m: L -> G
@@ -1168,11 +1167,12 @@ pub fn compute_pushout_complement(
     // Identification condition
     // ========================================================================
     //
-    // If m identifies two L-nodes, they must both be preserved, i.e. both lie
-    // in l(K). Otherwise a deleted item would be identified with a preserved
-    // item or with another deleted item in a way incompatible with the
-    // complement.
-    let l_nodes: Vec<_> = l_graph.nodes().iter().copied().collect();
+    // If m identifies two distinct L-elements, they must both be in l(K).
+    // This is still needed. But we do NOT collapse all K-preimages merely
+    // because they have the same G-image; slot construction below handles that.
+    // ========================================================================
+
+    let l_nodes: Vec<NodeId> = l_graph.nodes().iter().copied().collect();
 
     for (i, &l1) in l_nodes.iter().enumerate() {
         for &l2 in l_nodes.iter().skip(i + 1) {
@@ -1190,7 +1190,7 @@ pub fn compute_pushout_complement(
         }
     }
 
-    let l_edges: Vec<_> = l_graph.edges().iter().copied().collect();
+    let l_edges: Vec<EdgeId> = l_graph.edges().iter().copied().collect();
 
     for (i, &e1) in l_edges.iter().enumerate() {
         for &e2 in l_edges.iter().skip(i + 1) {
@@ -1226,31 +1226,19 @@ pub fn compute_pushout_complement(
         .filter_map(|&l_e| m.map_edge(l_e))
         .collect();
 
-    println!("--- PC deletion debug ---");
-println!("K nodes: {:?}", k.nodes());
-println!("K edges: {:?}", k.edges());
-println!("L nodes: {:?}", l_graph.nodes());
-println!("L edges: {:?}", l_graph.edges());
-println!("l_node_image in L: {:?}", l_node_image);
-println!("l_edge_image in L: {:?}", l_edge_image);
-println!("m_node_image in G: {:?}", m_node_image);
-println!("m_edge_image in G: {:?}", m_edge_image);
-println!("deleted_nodes in G: {:?}", deleted_nodes);
-println!("deleted_edges in G: {:?}", deleted_edges);
-    // Sanity: deleted nodes should not also be interface nodes.
-    for g_n in deleted_nodes.iter() {
+    for g_n in &deleted_nodes {
         if mlk_node_image.contains(g_n) {
             return Err(CategoricalError::IdentificationConditionViolated(format!(
-                "G-node {:?} is both deleted and preserved interface",
+                "G-node {:?} is both deleted and preserved",
                 g_n
             )));
         }
     }
 
-    for g_e in deleted_edges.iter() {
+    for g_e in &deleted_edges {
         if mlk_edge_image.contains(g_e) {
             return Err(CategoricalError::IdentificationConditionViolated(format!(
-                "G-edge {:?} is both deleted and preserved interface",
+                "G-edge {:?} is both deleted and preserved",
                 g_e
             )));
         }
@@ -1260,7 +1248,9 @@ println!("deleted_edges in G: {:?}", deleted_edges);
     // Dangling condition
     // ========================================================================
     //
-    // Any edge that remains in C must not be incident to a deleted node.
+    // Any edge that remains must not touch a deleted node.
+    // ========================================================================
+
     for &g_e in g.edges() {
         if deleted_edges.contains(&g_e) {
             continue;
@@ -1270,7 +1260,7 @@ println!("deleted_edges in G: {:?}", deleted_edges);
             for swb in swbs {
                 if deleted_nodes.contains(&swb.source) {
                     return Err(CategoricalError::DanglingConditionViolated(format!(
-                        "Preserved edge {:?} has source {:?} in deleted nodes",
+                        "Preserved edge {:?} has deleted source {:?}",
                         g_e, swb.source
                     )));
                 }
@@ -1290,7 +1280,7 @@ println!("deleted_edges in G: {:?}", deleted_edges);
             for t in targets {
                 if deleted_nodes.contains(&t) {
                     return Err(CategoricalError::DanglingConditionViolated(format!(
-                        "Preserved edge {:?} has target {:?} in deleted nodes",
+                        "Preserved edge {:?} has deleted target {:?}",
                         g_e, t
                     )));
                 }
@@ -1299,121 +1289,41 @@ println!("deleted_edges in G: {:?}", deleted_edges);
     }
 
     // ========================================================================
-    // Construct C as surviving part of G
+    // Construct C by slots over G-elements
     // ========================================================================
 
     let mut complement = BHyp::new();
 
-    // g node -> c node
-    let mut g_to_c_nodes: HashMap<NodeId, NodeId> = HashMap::new();
+    // K -> C
+    let mut k_to_c_nodes: HashMap<NodeId, NodeId> = HashMap::new();
+    let mut k_to_c_edges: HashMap<EdgeId, EdgeId> = HashMap::new();
 
-    // c node -> g node
+    // C -> G
     let mut c_to_g_nodes: HashMap<NodeId, NodeId> = HashMap::new();
-
-    let mut g_nodes: Vec<_> = g.nodes().iter().copied().collect();
-    g_nodes.sort();
-
-    for g_n in g_nodes {
-        if deleted_nodes.contains(&g_n) {
-            continue;
-        }
-
-        let c_n = complement.add_node();
-        g_to_c_nodes.insert(g_n, c_n);
-        c_to_g_nodes.insert(c_n, g_n);
-    }
-
-    // g edge -> c edge
-    let mut g_to_c_edges: HashMap<EdgeId, EdgeId> = HashMap::new();
-
-    // c edge -> g edge
     let mut c_to_g_edges: HashMap<EdgeId, EdgeId> = HashMap::new();
 
-    let mut g_edges: Vec<_> = g.edges().iter().copied().collect();
-    g_edges.sort();
+    // For resolving incident nodes.
+    let mut g_slot_to_c_node: HashMap<(NodeId, usize), NodeId> = HashMap::new();
 
-    for g_e in g_edges {
-        if deleted_edges.contains(&g_e) {
-            continue;
-        }
+    // ------------------------------------------------------------------------
+    // Nodes: group K-nodes by G-image, then by L-image.
+    //
+    // For fixed g:
+    //
+    //   l_a: [k_a0, k_a1, ...]
+    //   l_b: [k_b0, k_b1, ...]
+    //
+    // k_a0 and k_b0 share slot 0.
+    // k_a1 and k_b1 share slot 1.
+    //
+    // If there is only one L-image over g, multiple K-preimages remain distinct.
+    // This is the copy case.
+    // ------------------------------------------------------------------------
 
-        let swbs = g.get_sources_with_binding(g_e)
-        .ok_or_else(|| {
-            CategoricalError::ConstructionFailed(format!(
-                "G edge {:?} has no sources-with-binding",
-                g_e
-            ))
-        })?;
+    let mut node_fibers: HashMap<NodeId, HashMap<NodeId, Vec<NodeId>>> =
+        HashMap::new();
 
-        let targets = g.get_targets(g_e).ok_or_else(|| {
-            CategoricalError::ConstructionFailed(format!(
-                "G edge {:?} has no targets",
-                g_e
-            ))
-        })?;
-
-        let label = g.get_label(g_e).cloned();
-
-        let new_swbs: Vec<SourceWithBinding> = swbs
-            .iter()
-            .map(|swb| {
-                let source = *g_to_c_nodes.get(&swb.source).ok_or_else(|| {
-                    CategoricalError::DanglingConditionViolated(format!(
-                        "Preserved edge {:?} has source {:?}, but source was deleted",
-                        g_e, swb.source
-                    ))
-                })?;
-
-                let bound: Result<Vec<NodeId>, CategoricalError> = swb
-                    .bound
-                    .iter()
-                    .map(|&b| {
-                        g_to_c_nodes.get(&b).copied().ok_or_else(|| {
-                            CategoricalError::DanglingConditionViolated(format!(
-                                "Preserved edge {:?} binds {:?}, but bound node was deleted",
-                                g_e, b
-                            ))
-                        })
-                    })
-                    .collect();
-
-                Ok(SourceWithBinding {
-                    source,
-                    bound: bound?,
-                })
-            })
-            .collect::<Result<Vec<_>, CategoricalError>>()?;
-
-        let new_targets: Vec<NodeId> = targets
-            .iter()
-            .map(|&t| {
-                g_to_c_nodes.get(&t).copied().ok_or_else(|| {
-                    CategoricalError::DanglingConditionViolated(format!(
-                        "Preserved edge {:?} has target {:?}, but target was deleted",
-                        g_e, t
-                    ))
-                })
-            })
-            .collect::<Result<Vec<_>, CategoricalError>>()?;
-
-        let c_e = complement.add_edge(new_swbs, new_targets, label).map_err(|e| {
-            CategoricalError::ConstructionFailed(format!(
-                "Failed to add edge {:?} to complement: {:?}",
-                g_e, e
-            ))
-        })?;
-
-        g_to_c_edges.insert(g_e, c_e);
-        c_to_g_edges.insert(c_e, g_e);
-    }
-
-    // ========================================================================
-    // Build k: K -> C through G
-    // ========================================================================
-
-    let mut k_to_c_nodes: HashMap<NodeId, NodeId> = HashMap::new();
-
-    let mut k_nodes: Vec<_> = k.nodes().iter().copied().collect();
+    let mut k_nodes: Vec<NodeId> = k.nodes().iter().copied().collect();
     k_nodes.sort();
 
     for k_n in k_nodes {
@@ -1431,20 +1341,95 @@ println!("deleted_edges in G: {:?}", deleted_edges);
             ))
         })?;
 
-        let c_n = g_to_c_nodes.get(&g_n).copied().ok_or_else(|| {
-            CategoricalError::ConstructionFailed(format!(
-                "K-node {:?} maps through L-node {:?} to G-node {:?}, \
-                 but that G-node is not present in complement",
-                k_n, l_n, g_n
-            ))
-        })?;
-
-        k_to_c_nodes.insert(k_n, c_n);
+        node_fibers
+            .entry(g_n)
+            .or_default()
+            .entry(l_n)
+            .or_default()
+            .push(k_n);
     }
 
-    let mut k_to_c_edges: HashMap<EdgeId, EdgeId> = HashMap::new();
+    for by_l in node_fibers.values_mut() {
+        for ks in by_l.values_mut() {
+            ks.sort();
+        }
+    }
 
-    let mut k_edges: Vec<_> = k.edges().iter().copied().collect();
+    // Optional but recommended: require compatible fiber sizes when distinct
+    // L-nodes are identified by m.
+    for (&g_n, by_l) in &node_fibers {
+        if by_l.len() > 1 {
+            let sizes: HashSet<usize> = by_l.values().map(|ks| ks.len()).collect();
+
+            if sizes.len() > 1 {
+                return Err(CategoricalError::IdentificationConditionViolated(format!(
+                    "Incompatible node fiber sizes over G-node {:?}: {:?}",
+                    g_n, sizes
+                )));
+            }
+        }
+    }
+
+    let mut g_node_keys: Vec<NodeId> = node_fibers.keys().copied().collect();
+    g_node_keys.sort();
+
+    for g_n in g_node_keys {
+        let by_l = &node_fibers[&g_n];
+
+        let max_slots = by_l
+            .values()
+            .map(|ks| ks.len())
+            .max()
+            .unwrap_or(0);
+
+        for slot in 0..max_slots {
+            let c_n = complement.add_node();
+            g_slot_to_c_node.insert((g_n, slot), c_n);
+            c_to_g_nodes.insert(c_n, g_n);
+        }
+
+        for ks in by_l.values() {
+            for (slot, &k_n) in ks.iter().enumerate() {
+                let c_n = g_slot_to_c_node[&(g_n, slot)];
+                k_to_c_nodes.insert(k_n, c_n);
+            }
+        }
+    }
+
+    // Add context nodes: G-nodes outside m(L).
+    //
+    // Nodes in m(L) but not in m(l(K)) are deleted.
+    let mut g_nodes: Vec<NodeId> = g.nodes().iter().copied().collect();
+    g_nodes.sort();
+
+    for g_n in g_nodes {
+        if deleted_nodes.contains(&g_n) {
+            continue;
+        }
+
+        if g_slot_to_c_node.contains_key(&(g_n, 0)) {
+            continue;
+        }
+
+        if m_node_image.contains(&g_n) && !mlk_node_image.contains(&g_n) {
+            continue;
+        }
+
+        let c_n = complement.add_node();
+        g_slot_to_c_node.insert((g_n, 0), c_n);
+        c_to_g_nodes.insert(c_n, g_n);
+    }
+
+    // ========================================================================
+    // Edges: same slot logic
+    // ========================================================================
+
+    let mut g_slot_to_c_edge: HashMap<(EdgeId, usize), EdgeId> = HashMap::new();
+
+    let mut edge_fibers: HashMap<EdgeId, HashMap<EdgeId, Vec<EdgeId>>> =
+        HashMap::new();
+
+    let mut k_edges: Vec<EdgeId> = k.edges().iter().copied().collect();
     k_edges.sort();
 
     for k_e in k_edges {
@@ -1462,16 +1447,233 @@ println!("deleted_edges in G: {:?}", deleted_edges);
             ))
         })?;
 
-        let c_e = g_to_c_edges.get(&g_e).copied().ok_or_else(|| {
+        edge_fibers
+            .entry(g_e)
+            .or_default()
+            .entry(l_e)
+            .or_default()
+            .push(k_e);
+    }
+
+    for by_l in edge_fibers.values_mut() {
+        for es in by_l.values_mut() {
+            es.sort();
+        }
+    }
+
+    for (&g_e, by_l) in &edge_fibers {
+        if by_l.len() > 1 {
+            let sizes: HashSet<usize> = by_l.values().map(|es| es.len()).collect();
+
+            if sizes.len() > 1 {
+                return Err(CategoricalError::IdentificationConditionViolated(format!(
+                    "Incompatible edge fiber sizes over G-edge {:?}: {:?}",
+                    g_e, sizes
+                )));
+            }
+        }
+    }
+
+    let mut g_edge_keys: Vec<EdgeId> = edge_fibers.keys().copied().collect();
+    g_edge_keys.sort();
+
+    for g_e in g_edge_keys {
+        let by_l = &edge_fibers[&g_e];
+
+        let max_slots = by_l
+            .values()
+            .map(|es| es.len())
+            .max()
+            .unwrap_or(0);
+
+        for slot in 0..max_slots {
+            let rep_k_e = by_l
+                .values()
+                .find_map(|es| es.get(slot).copied())
+                .ok_or_else(|| {
+                    CategoricalError::ConstructionFailed(format!(
+                        "No representative K-edge for G-edge {:?}, slot {}",
+                        g_e, slot
+                    ))
+                })?;
+
+            let k_swbs = k.get_sources_with_binding(rep_k_e).ok_or_else(|| {
+                CategoricalError::ConstructionFailed(format!(
+                    "K-edge {:?} has no sources-with-binding",
+                    rep_k_e
+                ))
+            })?;
+
+            let k_targets = k.get_targets(rep_k_e).ok_or_else(|| {
+                CategoricalError::ConstructionFailed(format!(
+                    "K-edge {:?} has no targets",
+                    rep_k_e
+                ))
+            })?;
+
+            let label = g.get_label(g_e).cloned();
+
+            let new_swbs: Vec<SourceWithBinding> = k_swbs
+                .iter()
+                .map(|swb| {
+                    let source = *k_to_c_nodes.get(&swb.source).ok_or_else(|| {
+                        CategoricalError::ConstructionFailed(format!(
+                            "K-edge {:?} source {:?} has no C image",
+                            rep_k_e, swb.source
+                        ))
+                    })?;
+
+                    let bound: Result<Vec<NodeId>, CategoricalError> = swb
+                        .bound
+                        .iter()
+                        .map(|&b| {
+                            k_to_c_nodes.get(&b).copied().ok_or_else(|| {
+                                CategoricalError::ConstructionFailed(format!(
+                                    "K-edge {:?} bound node {:?} has no C image",
+                                    rep_k_e, b
+                                ))
+                            })
+                        })
+                        .collect();
+
+                    Ok(SourceWithBinding {
+                        source,
+                        bound: bound?,
+                    })
+                })
+                .collect::<Result<Vec<_>, CategoricalError>>()?;
+
+            let new_targets: Vec<NodeId> = k_targets
+                .iter()
+                .map(|&t| {
+                    k_to_c_nodes.get(&t).copied().ok_or_else(|| {
+                        CategoricalError::ConstructionFailed(format!(
+                            "K-edge {:?} target {:?} has no C image",
+                            rep_k_e, t
+                        ))
+                    })
+                })
+                .collect::<Result<Vec<_>, CategoricalError>>()?;
+
+            let c_e = complement
+                .add_edge(new_swbs, new_targets, label)
+                .map_err(|e| {
+                    CategoricalError::ConstructionFailed(format!(
+                        "Failed to add C-edge for G-edge {:?}, slot {}: {:?}",
+                        g_e, slot, e
+                    ))
+                })?;
+
+            g_slot_to_c_edge.insert((g_e, slot), c_e);
+            c_to_g_edges.insert(c_e, g_e);
+        }
+
+        for es in by_l.values() {
+            for (slot, &k_e) in es.iter().enumerate() {
+                let c_e = g_slot_to_c_edge[&(g_e, slot)];
+                k_to_c_edges.insert(k_e, c_e);
+            }
+        }
+    }
+
+    // ========================================================================
+    // Add context edges: G-edges outside m(L)
+    // ========================================================================
+
+    let mut g_edges: Vec<EdgeId> = g.edges().iter().copied().collect();
+    g_edges.sort();
+
+    for g_e in g_edges {
+        if deleted_edges.contains(&g_e) {
+            continue;
+        }
+
+        if m_edge_image.contains(&g_e) {
+            continue;
+        }
+
+        let swbs = g.get_sources_with_binding(g_e).ok_or_else(|| {
             CategoricalError::ConstructionFailed(format!(
-                "K-edge {:?} maps through L-edge {:?} to G-edge {:?}, \
-                 but that G-edge is not present in complement",
-                k_e, l_e, g_e
+                "G-edge {:?} has no sources-with-binding",
+                g_e
             ))
         })?;
 
-        k_to_c_edges.insert(k_e, c_e);
+        let targets = g.get_targets(g_e).ok_or_else(|| {
+            CategoricalError::ConstructionFailed(format!(
+                "G-edge {:?} has no targets",
+                g_e
+            ))
+        })?;
+
+        let label = g.get_label(g_e).cloned();
+
+        let new_swbs: Vec<SourceWithBinding> = swbs
+            .iter()
+            .map(|swb| {
+                let source = g_slot_to_c_node
+                    .get(&(swb.source, 0))
+                    .copied()
+                    .ok_or_else(|| {
+                        CategoricalError::DanglingConditionViolated(format!(
+                            "Context edge {:?} has source {:?}, but no C node slot 0 exists",
+                            g_e, swb.source
+                        ))
+                    })?;
+
+                let bound: Result<Vec<NodeId>, CategoricalError> = swb
+                    .bound
+                    .iter()
+                    .map(|&b| {
+                        g_slot_to_c_node
+                            .get(&(b, 0))
+                            .copied()
+                            .ok_or_else(|| {
+                                CategoricalError::DanglingConditionViolated(format!(
+                                    "Context edge {:?} binds {:?}, but no C node slot 0 exists",
+                                    g_e, b
+                                ))
+                            })
+                    })
+                    .collect();
+
+                Ok(SourceWithBinding {
+                    source,
+                    bound: bound?,
+                })
+            })
+            .collect::<Result<Vec<_>, CategoricalError>>()?;
+
+        let new_targets: Vec<NodeId> = targets
+            .iter()
+            .map(|&t| {
+                g_slot_to_c_node
+                    .get(&(t, 0))
+                    .copied()
+                    .ok_or_else(|| {
+                        CategoricalError::DanglingConditionViolated(format!(
+                            "Context edge {:?} has target {:?}, but no C node slot 0 exists",
+                            g_e, t
+                        ))
+                    })
+            })
+            .collect::<Result<Vec<_>, CategoricalError>>()?;
+
+        let c_e = complement
+            .add_edge(new_swbs, new_targets, label)
+            .map_err(|e| {
+                CategoricalError::ConstructionFailed(format!(
+                    "Failed to add context edge {:?}: {:?}",
+                    g_e, e
+                ))
+            })?;
+
+        c_to_g_edges.insert(c_e, g_e);
     }
+
+    // ========================================================================
+    // Build morphisms K -> C and C -> G
+    // ========================================================================
 
     let k_to_c = BHypMorphism::new(
         k.clone(),

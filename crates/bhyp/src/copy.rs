@@ -1011,138 +1011,218 @@ mod copying_tests {
         assert!(are_isomorphic(&tt, &result));
     
     }
+#[test]
+fn copy_simple_subhyp() {
+    // T: n_in --e--> n_out
+    let mut t = BHyp::new();
+    let n_in = t.add_node();
+    let n_out = t.add_node();
 
-    #[test]
-    fn copy_simple_subhyp() {
-        // Create a simple graph T: (n_in) -> (n_out)
-        let mut t = BHyp::new();
-        let n_in = t.add_node();
-        let n_out = t.add_node();
-        
-        t.add_edge(
-            vec![SourceWithBinding { source: n_in, bound: vec![] }],
-            vec![n_out],
-            Some(Label::Symbol("e".to_string()))
-        ).unwrap();  
+    t.add_edge(
+        vec![SourceWithBinding {
+            source: n_in,
+            bound: vec![],
+        }],
+        vec![n_out],
+        Some(Label::Symbol("e".to_string())),
+    )
+    .unwrap();
 
-        // create g containing sharing of T
-        let mut g = BHyp::new();
-        let t_in = g.add_node();
-        let t_out = g.add_node();
+    // G contains T, and t_out has out-degree 3.
+    //
+    //       e
+    // t_in ---> t_out
+    //             | f1
+    //             v
+    //             x1
+    //             | f2 etc...
+    //
+    let mut g = BHyp::new();
+    let g_t_in = g.add_node();
+    let g_t_out = g.add_node();
 
-        let x1 = g.add_node();
-        let x2 = g.add_node();
-        let x3 = g.add_node();
-        
-        g.add_edge(
-            vec![SourceWithBinding { source: t_in, bound: vec![] }],
-            vec![t_out],
-            Some(Label::Symbol("e".to_string()))
-        ).unwrap();
-        g.add_edge(
-            vec![SourceWithBinding { source: t_out, bound: vec![] }],
-            vec![x1],
-            Some(Label::Symbol("f1".to_string()))
-        ).unwrap();
-        g.add_edge(
-            vec![SourceWithBinding { source: t_out, bound: vec![] }],
-            vec![x2],
-            Some(Label::Symbol("f2".to_string()))
-        ).unwrap();
-        g.add_edge(
-            vec![SourceWithBinding { source: t_out, bound: vec![] }],
-            vec![x3],
-            Some(Label::Symbol("f3".to_string()))
-        ).unwrap();
+    let x1 = g.add_node();
+    let x2 = g.add_node();
+    let x3 = g.add_node();
 
+    g.add_edge(
+        vec![SourceWithBinding {
+            source: g_t_in,
+            bound: vec![],
+        }],
+        vec![g_t_out],
+        Some(Label::Symbol("e".to_string())),
+    )
+    .unwrap();
 
-        let mut k =  BHyp::new();
-        let x = k.add_node();
+    g.add_edge(
+        vec![SourceWithBinding {
+            source: g_t_out,
+            bound: vec![],
+        }],
+        vec![x1],
+        Some(Label::Symbol("f1".to_string())),
+    )
+    .unwrap();
 
-        // shared node maps
-        let r = BHypMorphism::new(
-            k.clone(),
-            g.clone(),
-            [(x, t_out)].into_iter().collect(),
-            HashMap::new(),
+    g.add_edge(
+        vec![SourceWithBinding {
+            source: g_t_out,
+            bound: vec![],
+        }],
+        vec![x2],
+        Some(Label::Symbol("f2".to_string())),
+    )
+    .unwrap();
 
-        ).unwrap();
+    g.add_edge(
+        vec![SourceWithBinding {
+            source: g_t_out,
+            bound: vec![],
+        }],
+        vec![x3],
+        Some(Label::Symbol("f3".to_string())),
+    )
+    .unwrap();
 
-        let l = BHypMorphism::new(
-            k.clone(),
-            t.clone(),
-            [(x, n_out)].into_iter().collect(),
-            HashMap::new(),
+    // K is the one-node graph selecting the node to be copied.
+    let mut k = BHyp::new();
+    let k_selected = k.add_node();
 
-        ).unwrap();
+    // K -> G selects g_t_out.
+    let k_to_g = BHypMorphism::new(
+        k.clone(),
+        g.clone(),
+        [(k_selected, g_t_out)].into_iter().collect(),
+        HashMap::new(),
+    )
+    .unwrap();
 
-        let shared_node = Span{
-            left : g.clone(),
-            middle : k,
-            right : t.clone(),
-            to_l: l,
-            to_r: r};
+    // K -> T selects n_out.
+    let k_to_t = BHypMorphism::new(
+        k.clone(),
+        t.clone(),
+        [(k_selected, n_out)].into_iter().collect(),
+        HashMap::new(),
+    )
+    .unwrap();
 
-        // Perform the copy
-        let k_node = shared_node.middle.nodes().iter().next().unwrap();
-        let n = g.out_degree(shared_node.clone().to_l.map_node(*k_node).unwrap());
+    // IMPORTANT:
+    //
+    // Span convention is:
+    //
+    //     left <- middle -> right
+    //
+    // Here:
+    //
+    //     G <- K -> T
+    //
+    let shared_node = Span {
+        left: g.clone(),
+        middle: k,
+        right: t.clone(),
+        to_l: k_to_g,
+        to_r: k_to_t,
+    };
 
-        assert_eq!(n, 3);
-      
-        let result = copy_subhypergraph(
-            &g, &t, shared_node).unwrap();
+    // Sanity check: the selected G node has out-degree 3.
+    let k_node = shared_node.middle.nodes().iter().next().copied().unwrap();
+    let selected_g_node = shared_node.to_l.map_node(k_node).unwrap();
+    let n = g.out_degree(selected_g_node);
 
-        // result should have 6 edges and 7 nodes
-        assert_eq!(result.nodes().len(), 7);
-        assert_eq!(result.edges().len(), 6);
+    assert_eq!(selected_g_node, g_t_out);
+    assert_eq!(n, 3);
 
-        let mut exp = BHyp::new();
-        let t_in = exp.add_node();
+    let result = copy_subhypergraph(&g, &t, shared_node).unwrap();
 
-        let x1 = exp.add_node();
-        let x2 = exp.add_node();
-        let x3 = exp.add_node();
+    // Expected:
+    //
+    // t_in is shared.
+    // t_out is copied into y1, y2, y3.
+    // Each y_i gets one outgoing f_i edge.
+    //
+    // Nodes:
+    //   t_in, x1, x2, x3, y1, y2, y3 = 7
+    //
+    // Edges:
+    //   three e edges + f1 + f2 + f3 = 6
+    assert_eq!(result.nodes().len(), 7);
+    assert_eq!(result.edges().len(), 6);
 
-        let y1 = exp.add_node();
-        let y2 = exp.add_node();
-        let y3 = exp.add_node();
-        
-        exp.add_edge(
-            vec![SourceWithBinding { source: t_in, bound: vec![] }],
-            vec![y1],
-            Some(Label::Symbol("e".to_string()))
-        ).unwrap();
-        exp.add_edge(
-            vec![SourceWithBinding { source: t_in, bound: vec![] }],
-            vec![y2],
-            Some(Label::Symbol("e".to_string()))
-        ).unwrap();
-        exp.add_edge(
-            vec![SourceWithBinding { source: t_in, bound: vec![] }],
-            vec![y3],
-            Some(Label::Symbol("e".to_string()))
-        ).unwrap();
+    let mut exp = BHyp::new();
 
-        exp.add_edge(
-            vec![SourceWithBinding { source: y1, bound: vec![] }],
-            vec![x1],
-            Some(Label::Symbol("f1".to_string()))
-        ).unwrap();
-        exp.add_edge(
-            vec![SourceWithBinding { source: y2, bound: vec![] }],
-            vec![x2],
-            Some(Label::Symbol("f2".to_string()))
-        ).unwrap();
-        exp.add_edge(
-            vec![SourceWithBinding { source: y3, bound: vec![] }],
-            vec![x3],
-            Some(Label::Symbol("f3".to_string()))
-        ).unwrap();
+    let exp_t_in = exp.add_node();
 
-        assert!(are_isomorphic(&exp, &result));
+    let exp_x1 = exp.add_node();
+    let exp_x2 = exp.add_node();
+    let exp_x3 = exp.add_node();
 
-    
-    }
+    let y1 = exp.add_node();
+    let y2 = exp.add_node();
+    let y3 = exp.add_node();
+
+    exp.add_edge(
+        vec![SourceWithBinding {
+            source: exp_t_in,
+            bound: vec![],
+        }],
+        vec![y1],
+        Some(Label::Symbol("e".to_string())),
+    )
+    .unwrap();
+
+    exp.add_edge(
+        vec![SourceWithBinding {
+            source: exp_t_in,
+            bound: vec![],
+        }],
+        vec![y2],
+        Some(Label::Symbol("e".to_string())),
+    )
+    .unwrap();
+
+    exp.add_edge(
+        vec![SourceWithBinding {
+            source: exp_t_in,
+            bound: vec![],
+        }],
+        vec![y3],
+        Some(Label::Symbol("e".to_string())),
+    )
+    .unwrap();
+
+    exp.add_edge(
+        vec![SourceWithBinding {
+            source: y1,
+            bound: vec![],
+        }],
+        vec![exp_x1],
+        Some(Label::Symbol("f1".to_string())),
+    )
+    .unwrap();
+
+    exp.add_edge(
+        vec![SourceWithBinding {
+            source: y2,
+            bound: vec![],
+        }],
+        vec![exp_x2],
+        Some(Label::Symbol("f2".to_string())),
+    )
+    .unwrap();
+
+    exp.add_edge(
+        vec![SourceWithBinding {
+            source: y3,
+            bound: vec![],
+        }],
+        vec![exp_x3],
+        Some(Label::Symbol("f3".to_string())),
+    )
+    .unwrap();
+
+    assert!(are_isomorphic(&exp, &result));
+}
 
     #[test]
     fn test_copying_fails_when_node_not_in_output() {
