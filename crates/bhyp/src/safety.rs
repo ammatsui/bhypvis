@@ -275,7 +275,7 @@ fn check_bound_not_target(g: &BHyp, violations: &mut Vec<SafetyViolation>) {
     // Check if any bound node is a target
     for &edge_id in g.edges() {
         if let Some(targets) = g.get_targets(edge_id) {
-            for &target in targets {
+            for target in targets {
                 if let Some(&binding_edge) = bound_nodes.get(&target) {
                     violations.push(SafetyViolation::BoundNodeIsTarget {
                         node: target,
@@ -354,7 +354,7 @@ fn compute_body_outputs(g: &BHyp, edge_id: EdgeId, source_idx: usize) -> HashSet
         // Get all targets of body edges that aren't also sources in the body
         for &body_edge_id in &body_edges {
             if let Some(targets) = g.get_targets(body_edge_id) {
-                for &target in targets {
+                for target in targets {
                     if !body_sources.contains(&target) {
                         body_outputs.insert(target);
                     }

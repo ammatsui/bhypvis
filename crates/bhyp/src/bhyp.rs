@@ -209,8 +209,8 @@ impl BHyp {
     }
 
     /// Get the targets of an edge
-    pub fn get_targets(&self, edge: EdgeId) -> Option<&Vec<NodeId>> {
-        self.targets.get(&edge)
+    pub fn get_targets(&self, edge: EdgeId) -> Option<Vec<NodeId>> {
+        self.targets.get(&edge).cloned()
     }
 
     /// Get bound variables for a specific source of an edge
@@ -337,7 +337,7 @@ impl BHyp {
                     if has_source_in_body {
                         // Add targets of this edge to the body
                         if let Some(e_targets) = self.get_targets(e) {
-                            for &t in e_targets {
+                            for t in e_targets {
                                 if body.insert(t) {
                                     changed = true;
                                 }
@@ -670,7 +670,7 @@ impl BHyp_with_interface {
         self.bhyp.get_sources_with_binding(edge)
     }
 
-    pub fn get_targets(&self, edge: EdgeId) -> Option<&Vec<NodeId>> {
+    pub fn get_targets(&self, edge: EdgeId) -> Option<Vec<NodeId>> {
         self.bhyp.get_targets(edge)
     }
 

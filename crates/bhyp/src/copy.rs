@@ -223,149 +223,453 @@ fn check_copying_conditions(
 // Copying (Definition 3.12)
 // ============================================================================
 
-/// Create n copies of a sub-hypergraph T, sharing free vertices
-/// 
-/// This creates (n·T)* which is n copies of T glued along their free vertices (input interface).
-/// Also returns morphism projectino onto the single T
+
+    /// Create n copies of a sub-hypergraph T, sharing free vertices.
+///
+/// This creates (n·T)*, i.e. n copies of T glued along the chosen interface.
+/// Also returns:
+/// - projection: (n·T)* -> T
+/// - inclusions: Vec<T -> (n·T)*>, one inclusion for each copy
 pub fn compute_n_copies(
     t: &BHyp,
     n: usize,
-    // Optional interface: (K, K -> T). If None, defaults to T's input interface.
+    // Optional interface: (K, K -> T). If None, defaults to T's input interface,
+    // for gluing along it.
     interface: Option<(BHyp, BHypMorphism)>,
-) -> Result<(BHyp, BHypMorphism), CopyError> {
+) -> Result<(BHyp, BHypMorphism, Vec<BHypMorphism>), CopyError> {
     if n == 0 {
-        return Err(CopyError::InvalidSubhypergraph("Cannot create 0 copies".to_string()));
-    }
-    
-    // the result is pushout (T <- K -> (n-1)T) with K as the interface
-    if n == 1 {
-        let id_nodes: HashMap<NodeId, NodeId> = t.nodes().iter()
-            .map(|&n| (n, n)).collect();
-        let id_edges: HashMap<EdgeId, EdgeId> = t.edges().iter()
-            .map(|&e| (e, e)).collect();
-        let projection = BHypMorphism::new(
-            t.clone(),
-            t.clone(),
-            id_nodes,
-            id_edges,
-        )?;
-        return Ok((t.clone(), projection));
+        return Err(CopyError::InvalidSubhypergraph(
+            "Cannot create 0 copies".to_string(),
+        ));
     }
 
-    // Start with first copy
+    // Identity on T.
+    let id_nodes: HashMap<NodeId, NodeId> = t
+        .nodes()
+        .iter()
+        .map(|&node| (node, node))
+        .collect();
+
+    let id_edges: HashMap<EdgeId, EdgeId> = t
+        .edges()
+        .iter()
+        .map(|&edge| (edge, edge))
+        .collect();
+
+    let id_t = BHypMorphism::new(
+        t.clone(),
+        t.clone(),
+        id_nodes,
+        id_edges,
+    )?;
+
+    // If n == 1, result is T itself.
+    if n == 1 {
+        let projection = id_t.clone();
+        let inclusions = vec![id_t];
+
+        return Ok((t.clone(), projection, inclusions));
+    }
+
+    // Start with first copy.
     let mut result = t.clone();
 
-    // 1. Resolve the interface (K) and its injection into T (K -> T)
+    // Current projection:
+    //
+    //     result -> T
+    //
+    // Initially id_T.
+    let mut projection = id_t.clone();
+
+    // Current inclusions:
+    //
+    //     T -> result
+    //
+    // Initially just id_T.
+    let mut inclusions: Vec<BHypMorphism> = vec![id_t];
+
+    // ---------------------------------------------------------------------
+    // 1. Resolve the interface K and its injection into T.
+    // ---------------------------------------------------------------------
+
     let (k, k_to_t) = match interface {
         Some((custom_k, custom_morphism)) => (custom_k, custom_morphism),
         None => {
-            // Default behavior: use the input interface
+            // Default behavior: use the input interface.
             let ti = BHyp_with_interface::from_bhyp(t.clone());
+
             let default_k = ti.input_interface().clone();
+
             let default_morphism = BHypMorphism::new(
                 default_k.clone(),
                 t.clone(),
                 ti.input_map().clone(),
                 HashMap::new(),
             )?;
+
             (default_k, default_morphism)
         }
     };
-    
-    // interface map to the copied stays the same but changes codomain
+
+    // Interface map to the current copied object.
+    //
+    // Initially:
+    //
+    //     K -> T = result
+    //
     let mut k_to_tn = BHypMorphism::new(
         k.clone(),
         result.clone(),
         k_to_t.on_nodes().clone(),
-        k_to_t.on_edges().clone(), // Supports K having edges if passed manually
+        k_to_t.on_edges().clone(),
     )?;
 
-    // projection starts as id, then gets composed with the next one
-    let mut projection = identity_morphism(t);
-    
-    // For copies 2..n, use pushout to glue along the interface K
+    // ---------------------------------------------------------------------
+    // 2. For copies 2..n, glue another T along K.
+    // ---------------------------------------------------------------------
+
     for _copy_idx in 1..n {
+        // Pushout:
+        //
+        //     result <- K -> T
+        //
+        // producing:
+        //
+        //     next.pushout = result glued with fresh T along K
+        //
+        // with injections:
+        //
+        //     next.morphism_from_b : result -> next.pushout
+        //     next.morphism_from_c : T      -> next.pushout
+        //
         let next = compute_pushout(&k_to_tn, &k_to_t)?;
 
-        // build the projection maps
+        // -----------------------------------------------------------------
+        // Build the new projection:
+        //
+        //     next.pushout -> T
+        //
+        // On the newly added T copy, projection is identity.
+        // On the old result part, projection is previous projection.
+        // -----------------------------------------------------------------
+
         let mut proj_nodes: HashMap<NodeId, NodeId> = HashMap::new();
         let mut proj_edges: HashMap<EdgeId, EdgeId> = HashMap::new();
 
-        // 1. Invert the nodes map
-        // first inverse T -> T(n+1), projecting the id back from the n+1st copy
-        for (&t_id, &next_id) in next.morphism_from_c.on_nodes().iter() {
-            proj_nodes.insert(next_id, t_id);
+        // New copy T -> pushout, invert to define projection back to T.
+        for (&t_node, &po_node) in next.morphism_from_c.on_nodes().iter() {
+            proj_nodes.insert(po_node, t_node);
         }
-        
-        // Second inverse: Compose (T(n+1) <- Tn) with (Tn -> T)
-        for (&tn_id, &next_id) in next.morphism_from_b.on_nodes().iter() {
-            if let Some(&t_id) = projection.on_nodes().get(&tn_id) {
-                proj_nodes.insert(next_id, t_id);
+
+        for (&t_edge, &po_edge) in next.morphism_from_c.on_edges().iter() {
+            proj_edges.insert(po_edge, t_edge);
+        }
+
+        // Old result -> pushout, compose old projection result -> T.
+        for (&old_node, &po_node) in next.morphism_from_b.on_nodes().iter() {
+            if let Some(&t_node) = projection.on_nodes().get(&old_node) {
+                proj_nodes.insert(po_node, t_node);
             }
         }
 
-        // 2. Invert the edges map
-        for (&t_id, &glued_id) in next.morphism_from_c.on_edges().iter() {
-            proj_edges.insert(glued_id, t_id);
-        }
-        
-        for (&tn_id, &glued_id) in next.morphism_from_b.on_edges().iter() {
-            if let Some(&t_id) = projection.on_edges().get(&tn_id) {
-                proj_edges.insert(glued_id, t_id);
+        for (&old_edge, &po_edge) in next.morphism_from_b.on_edges().iter() {
+            if let Some(&t_edge) = projection.on_edges().get(&old_edge) {
+                proj_edges.insert(po_edge, t_edge);
             }
         }
 
-        // update the result
+        // -----------------------------------------------------------------
+        // Build updated inclusions.
+        //
+        // Old inclusions:
+        //
+        //     incl_i : T -> result
+        //
+        // become:
+        //
+        //     T --incl_i--> result --next.morphism_from_b--> pushout
+        //
+        // New inclusion is:
+        //
+        //     next.morphism_from_c : T -> pushout
+        // -----------------------------------------------------------------
+
+        let mut updated_inclusions: Vec<BHypMorphism> = Vec::new();
+
+        for old_incl in inclusions.iter() {
+            let mut new_incl_nodes: HashMap<NodeId, NodeId> = HashMap::new();
+            let mut new_incl_edges: HashMap<EdgeId, EdgeId> = HashMap::new();
+
+            // Nodes: T -> old result -> new pushout.
+            for (&t_node, &old_result_node) in old_incl.on_nodes().iter() {
+                let po_node = next
+                    .morphism_from_b
+                    .map_node(old_result_node)
+                    .ok_or_else(|| {
+                        CopyError::InvalidSubhypergraph(format!(
+                            "pushout injection from old result does not map node {:?}",
+                            old_result_node
+                        ))
+                    })?;
+
+                new_incl_nodes.insert(t_node, po_node);
+            }
+
+            // Edges: T -> old result -> new pushout.
+            for (&t_edge, &old_result_edge) in old_incl.on_edges().iter() {
+                let po_edge = next
+                    .morphism_from_b
+                    .map_edge(old_result_edge)
+                    .ok_or_else(|| {
+                        CopyError::InvalidSubhypergraph(format!(
+                            "pushout injection from old result does not map edge {:?}",
+                            old_result_edge
+                        ))
+                    })?;
+
+                new_incl_edges.insert(t_edge, po_edge);
+            }
+
+            let updated_incl = BHypMorphism::new(
+                t.clone(),
+                next.pushout.clone(),
+                new_incl_nodes,
+                new_incl_edges,
+            )?;
+
+            updated_inclusions.push(updated_incl);
+        }
+
+        // Add inclusion of the newly glued copy.
+        //
+        // This is exactly the pushout injection:
+        //
+        //     T -> next.pushout
+        //
+        let new_copy_inclusion = BHypMorphism::new(
+            t.clone(),
+            next.pushout.clone(),
+            next.morphism_from_c.on_nodes().clone(),
+            next.morphism_from_c.on_edges().clone(),
+        )?;
+
+        updated_inclusions.push(new_copy_inclusion);
+
+        // -----------------------------------------------------------------
+        // Update result.
+        // -----------------------------------------------------------------
+
         result = next.pushout.clone();
-         
-        // Track where the interface nodes ended up in the newly glued graph T(n+1)
+
+        // -----------------------------------------------------------------
+        // Update K -> result for the next iteration.
+        //
+        // Track where the interface nodes ended up through the old-result
+        // injection:
+        //
+        //     K -> old result -> new result
+        // -----------------------------------------------------------------
+
         let mut new_k_nodes = HashMap::new();
-        for (&k_id, &tn_id) in k_to_tn.on_nodes().iter() {
-            if let Some(&next_id) = next.morphism_from_b.on_nodes().get(&tn_id) {
-                new_k_nodes.insert(k_id, next_id);
+
+        for (&k_node, &old_result_node) in k_to_tn.on_nodes().iter() {
+            if let Some(&po_node) = next.morphism_from_b.on_nodes().get(&old_result_node) {
+                new_k_nodes.insert(k_node, po_node);
             }
         }
 
         let mut new_k_edges = HashMap::new();
-        for (&k_id, &tn_id) in k_to_tn.on_edges().iter() {
-            if let Some(&next_id) = next.morphism_from_b.on_edges().get(&tn_id) {
-                new_k_edges.insert(k_id, next_id);
+
+        for (&k_edge, &old_result_edge) in k_to_tn.on_edges().iter() {
+            if let Some(&po_edge) = next.morphism_from_b.on_edges().get(&old_result_edge) {
+                new_k_edges.insert(k_edge, po_edge);
             }
         }
 
-        // Create the updated interface morphism using the NEW glued IDs
         k_to_tn = BHypMorphism::new(
             k.clone(),
             result.clone(),
-            new_k_nodes, 
+            new_k_nodes,
             new_k_edges,
         )?;
 
-        // create the projection map 
+        // Update projection.
         projection = BHypMorphism::new(
             result.clone(),
             t.clone(),
             proj_nodes,
-            proj_edges
-        ).unwrap();
+            proj_edges,
+        )?;
+
+        // Update inclusions.
+        inclusions = updated_inclusions;
     }
- 
-    // make sure correct number of edges
-    // (If K contains edges, the assertion would fail because glued edges collapse.
-    // Assuming K is typically discrete, this assertion is safe.)
+
+    // If K contains edges, glued edges collapse, so this assertion only makes
+    // sense when K is discrete.
     if k.edges().is_empty() {
         assert_eq!(result.edges().len(), n * t.edges().len());
     }
 
-    Ok((result, projection))
+    if inclusions.len() != n {
+        return Err(CopyError::InvalidSubhypergraph(format!(
+            "internal error: expected {} inclusions, got {}",
+            n,
+            inclusions.len()
+        )));
+    }
+
+    Ok((result, projection, inclusions))
+
 }
+
+
+
+/// Create n copies of a sub-hypergraph T, sharing free vertices
+/// 
+/// This creates (n·T)* which is n copies of T glued along their free vertices (input interface).
+/// Also returns morphism projectino onto the single T
+/// along with n inclusions of T into the result
+// pub fn compute_n_copies(
+//     t: &BHyp,
+//     n: usize,
+//     // Optional interface: (K, K -> T). If None, defaults to T's input interface,
+//     // for glueing along it
+//     interface: Option<(BHyp, BHypMorphism)>,
+// ) -> Result<(BHyp, BHypMorphism, Vec<BHypMorphism>), CopyError> {
+//     if n == 0 {
+//         return Err(CopyError::InvalidSubhypergraph("Cannot create 0 copies".to_string()));
+//     }
+    
+//     // the result is pushout (T <- K -> (n-1)T) with K as the interface
+//     if n == 1 {
+//         let id_nodes: HashMap<NodeId, NodeId> = t.nodes().iter()
+//             .map(|&n| (n, n)).collect();
+//         let id_edges: HashMap<EdgeId, EdgeId> = t.edges().iter()
+//             .map(|&e| (e, e)).collect();
+//         let projection = BHypMorphism::new(
+//             t.clone(),
+//             t.clone(),
+//             id_nodes,
+//             id_edges,
+//         )?;
+//         return Ok((t.clone(), projection));
+//     }
+
+//     // Start with first copy
+//     let mut result = t.clone();
+
+//     // 1. Resolve the interface (K) and its injection into T (K -> T)
+//     let (k, k_to_t) = match interface {
+//         Some((custom_k, custom_morphism)) => (custom_k, custom_morphism),
+//         None => {
+//             // Default behavior: use the input interface
+//             let ti = BHyp_with_interface::from_bhyp(t.clone());
+//             let default_k = ti.input_interface().clone();
+//             let default_morphism = BHypMorphism::new(
+//                 default_k.clone(),
+//                 t.clone(),
+//                 ti.input_map().clone(),
+//                 HashMap::new(),
+//             )?;
+//             (default_k, default_morphism)
+//         }
+//     };
+    
+//     // interface map to the copied stays the same but changes codomain
+//     let mut k_to_tn = BHypMorphism::new(
+//         k.clone(),
+//         result.clone(),
+//         k_to_t.on_nodes().clone(),
+//         k_to_t.on_edges().clone(), // Supports K having edges if passed manually
+//     )?;
+
+//     // projection starts as id, then gets composed with the next one
+//     let mut projection = identity_morphism(t);
+    
+//     // For copies 2..n, use pushout to glue along the interface K
+//     for _copy_idx in 1..n {
+//         let next = compute_pushout(&k_to_tn, &k_to_t)?;
+
+//         // build the projection maps
+//         let mut proj_nodes: HashMap<NodeId, NodeId> = HashMap::new();
+//         let mut proj_edges: HashMap<EdgeId, EdgeId> = HashMap::new();
+
+//         // 1. Invert the nodes map
+//         // first inverse T -> T(n+1), projecting the id back from the n+1st copy
+//         for (&t_id, &next_id) in next.morphism_from_c.on_nodes().iter() {
+//             proj_nodes.insert(next_id, t_id);
+//         }
+        
+//         // Second inverse: Compose (T(n+1) <- Tn) with (Tn -> T)
+//         for (&tn_id, &next_id) in next.morphism_from_b.on_nodes().iter() {
+//             if let Some(&t_id) = projection.on_nodes().get(&tn_id) {
+//                 proj_nodes.insert(next_id, t_id);
+//             }
+//         }
+
+//         // 2. Invert the edges map
+//         for (&t_id, &glued_id) in next.morphism_from_c.on_edges().iter() {
+//             proj_edges.insert(glued_id, t_id);
+//         }
+        
+//         for (&tn_id, &glued_id) in next.morphism_from_b.on_edges().iter() {
+//             if let Some(&t_id) = projection.on_edges().get(&tn_id) {
+//                 proj_edges.insert(glued_id, t_id);
+//             }
+//         }
+
+//         // update the result
+//         result = next.pushout.clone();
+         
+//         // Track where the interface nodes ended up in the newly glued graph T(n+1)
+//         let mut new_k_nodes = HashMap::new();
+//         for (&k_id, &tn_id) in k_to_tn.on_nodes().iter() {
+//             if let Some(&next_id) = next.morphism_from_b.on_nodes().get(&tn_id) {
+//                 new_k_nodes.insert(k_id, next_id);
+//             }
+//         }
+
+//         let mut new_k_edges = HashMap::new();
+//         for (&k_id, &tn_id) in k_to_tn.on_edges().iter() {
+//             if let Some(&next_id) = next.morphism_from_b.on_edges().get(&tn_id) {
+//                 new_k_edges.insert(k_id, next_id);
+//             }
+//         }
+
+//         // Create the updated interface morphism using the NEW glued IDs
+//         k_to_tn = BHypMorphism::new(
+//             k.clone(),
+//             result.clone(),
+//             new_k_nodes, 
+//             new_k_edges,
+//         )?;
+
+//         // create the projection map 
+//         projection = BHypMorphism::new(
+//             result.clone(),
+//             t.clone(),
+//             proj_nodes,
+//             proj_edges
+//         ).unwrap();
+//     }
+ 
+//     // make sure correct number of edges
+//     // (If K contains edges, the assertion would fail because glued edges collapse.
+//     // Assuming K is typically discrete, this assertion is safe.)
+//     if k.edges().is_empty() {
+//         assert_eq!(result.edges().len(), n * t.edges().len());
+//     }
+
+//     Ok((result, projection))
+// }
 
 
 pub fn compute_n_copies_with_interface(
     t_int: &BHyp_with_interface,
     n: usize,
     interface: Option<(BHyp, BHypMorphism)>,
-) -> Result<(BHyp_with_interface, BHypMorphism), CopyError> {
+) -> Result<(BHyp_with_interface, BHypMorphism, Vec<BHypMorphism>), CopyError> {
     
     // 1. Resolve the interface (if None, efficiently use the already-computed input interface)
     let resolved_interface = match interface {
@@ -384,7 +688,7 @@ pub fn compute_n_copies_with_interface(
     };
 
     // 2. Reuse the core logic (no duplication!)
-    let (raw_result, projection) = compute_n_copies(
+    let (raw_result, projection, incls) = compute_n_copies(
         t_int.bhyp(), 
         n, 
         resolved_interface
@@ -393,7 +697,7 @@ pub fn compute_n_copies_with_interface(
     // 3. Wrap the result, automatically recalculating the new interface boundaries
     let final_result = BHyp_with_interface::from_bhyp(raw_result);
 
-    Ok((final_result, projection))
+    Ok((final_result, projection, incls))
 }
 
 
@@ -415,30 +719,61 @@ pub fn compute_n_copies_with_interface(
 pub fn copy_subhypergraph(
     g: &BHyp,
     t: &BHyp,
-    shared_node: Span, // make it a span relating two vertices one in g one in t, G <- K -> T
+    shared_node: Span, // G <- K -> T
 ) -> Result<BHyp, CopyError> {
-    // ToDo test  if n = 1 should equal original bhyp
-    // Check safe copying conditions
-    let incl = build_inclusion(t, g).unwrap();
+    // Inclusion T -> G
+    let incl = build_inclusion(t, g)?;
+
     check_copying_conditions(g, t, shared_node.clone())?;
 
-    // let g_node = shared_node.to_l.on_nodes().get(&shared_k_node).unwrap();
-    // let n = shared_node.left.out_degree(*g_node);
-    
-    let k_node = shared_node.middle.nodes().iter().next().unwrap();
-    let n = g.out_degree(shared_node.clone().to_l.map_node(*k_node).unwrap());
+    let k_node = shared_node
+        .middle
+        .nodes()
+        .iter()
+        .next()
+        .copied()
+        .ok_or_else(|| {
+            CopyError::InvalidSubhypergraph(
+                "shared_node.middle must contain the distinguished node".to_string(),
+            )
+        })?;
 
-    assert!(n > 0);
-    
-    // Create (n·T)* - n copies sharing free vertices
-    let (n_copies, projection) = compute_n_copies(t, n, None)?;
-    
-    // Use pushout complement to get result
-    let pushout_complement = compute_pushout_complement(&projection, &incl)?;
-    
-    Ok(pushout_complement.complement)
+    let g_node = shared_node
+        .to_l
+        .map_node(k_node)
+        .ok_or_else(|| {
+            CopyError::InvalidSubhypergraph(format!(
+                "shared_node.to_l does not map distinguished node {:?}",
+                k_node
+            ))
+        })?;
+
+    let n = g.out_degree(g_node);
+
+    // if n < 2 {
+    //     return Err(CopyError::InvalidConstruction(format!(
+    //         "copy_subhypergraph requires out_degree({:?}) >= 2, got {}",
+    //         g_node, n
+    //     )));
+    // }
+
+    // (n·T)* -> T
+    //
+    // compute_n_copies(t, n, None) should build n copies of T glued along
+    // free interface nodes, and projection : (n·T)* -> T.
+    let (_n_copies, projection, _incls) = compute_n_copies(t, n, None)?;
+
+    // Pushout complement:
+    //
+    //     T  <───────  (n·T)*
+    //     │               │
+    //     ▼       ⌟       ▼
+    //     G  <───────    Ĝ_T
+    //
+    let pc = compute_pushout_complement(&projection, &incl)?;
+
+    Ok(pc.complement)
 }
-
 
 #[cfg(test)]
 mod copying_tests {
@@ -533,7 +868,7 @@ mod copying_tests {
         
 
         let n = 1;
-        let (result, _) = compute_n_copies(&t, n, None).unwrap();
+        let (result, _, _) = compute_n_copies(&t, n, None).unwrap();
         
         // the resulting graph should be the same as the original one
         assert_eq!(result.nodes().len(), t.nodes().len());
@@ -643,7 +978,7 @@ mod copying_tests {
         
 
         let n = 3;
-        let (result, _) = compute_n_copies(&t, n, None).unwrap();
+        let (result, _, _) = compute_n_copies(&t, n, None).unwrap();
         
         // Because n_in and n_out are interfaces, they act as the glue points.
         // 3 copies glued at the interface means the resulting graph has exactly 
@@ -898,7 +1233,7 @@ pub fn glue_subhypergraph(
 
     // todo add optionsl interface parameter
     // build projection n H -> H
-    let (nH, proj) = compute_n_copies(h, n, None).unwrap();
+    let (nH, proj, _) = compute_n_copies(h, n, None).unwrap();
     // build inclusion n H -> G
     let incl = build_inclusion(&nH, g).unwrap();
     // build pushout (G <- n H -> H)
