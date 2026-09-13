@@ -1134,6 +1134,7 @@ fn copy_simple_subhyp() {
     assert_eq!(n, 3);
 
     let result = copy_subhypergraph(&g, &t, shared_node).unwrap();
+    
 
     // Expected:
     //

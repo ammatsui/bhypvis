@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 // Assuming these are imported from the bhyp module
-use crate::bhyp::{BHyp, EdgeId, Label, NodeId, SourceWithBinding};
+use crate::bhyp::{BHyp, BHyp_with_interface, EdgeId, Label, NodeId, SourceWithBinding};
 
 /// Error types for morphism construction
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -377,6 +377,27 @@ pub fn identity_morphism(bhyp: &BHyp) -> BHypMorphism {
     BHypMorphism::new_unchecked(bhyp.clone(), bhyp.clone(), on_nodes, on_edges)
 }
 
+pub fn combined_interface_to_bhyp_morphism(
+    bhyp: &BHyp_with_interface,
+) -> Result<BHypMorphism, MorphismError> {
+    let mut combined_interface = BHyp::new();
+    let mut node_map: HashMap<NodeId, NodeId> = HashMap::new();
+
+    // These are nodes of the underlying BHyp that are either input or output.
+    let combined_nodes = bhyp.combined_interface_nodes();
+
+    for h_node in combined_nodes {
+        let interface_node = combined_interface.add_node();
+        node_map.insert(interface_node, h_node);
+    }
+
+    BHypMorphism::new(
+        combined_interface,
+        bhyp.bhyp().clone(),
+        node_map,
+        HashMap::new(), // interface is discrete, so no edge map
+    )
+}
 
 /// Span and CoSpan structs
 #[derive(Debug, Clone)]
@@ -728,7 +749,7 @@ pub fn build_inclusion(t: &BHyp, g: &BHyp) -> Result<BHypMorphism, MorphismError
 );   
 return result
     }
-
+ 
     return Err(MorphismError::DomainMismatch);
 
     

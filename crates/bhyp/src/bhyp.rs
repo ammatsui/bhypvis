@@ -575,6 +575,17 @@ impl BHyp_with_interface {
         &self.output_interface
     }
 
+    pub fn combined_interface(&self) -> BHyp {
+        let mut combined_interface = BHyp::new();
+    
+        for h_node in self.combined_interface_nodes() {
+            let interface_node = combined_interface.add_node();
+            
+        }
+        combined_interface
+
+    }
+
     /// Get the input interface nodes as a set of NodeIds (from the main bhyp)
     pub fn input_interface_nodes(&self) -> HashSet<NodeId> {
         self.input_map.values().copied().collect()
@@ -587,14 +598,14 @@ impl BHyp_with_interface {
 
     /// Get the input interface nodes as a set of NodeIds (from the main bhyp)
     pub fn combined_interface_nodes(&self) -> HashSet<NodeId> {
-        let combined: HashMap<NodeId, NodeId> = self.input_map()
-    .iter()
-    .chain(self.output_map().iter())
-    .map(|(&k, &v)| (k, v)) // Dereference the borrowed keys and values
-    .collect();
-        
-        combined.values().copied().collect()
-    }
+    self.input_map
+        .values()
+        .chain(self.output_map.values())
+        .copied()
+        .collect()
+}
+
+
 
     /// Get the mapping from input interface nodes to bhyp nodes
     pub fn input_map(&self) -> &HashMap<NodeId, NodeId> {
@@ -607,14 +618,16 @@ impl BHyp_with_interface {
     }
 
     pub fn combined_interface_map(&self) -> HashMap<NodeId, NodeId> {
-        let combined: HashMap<NodeId, NodeId> = self.input_map()
-    .iter()
-    .chain(self.output_map().iter())
-    .map(|(&k, &v)| (k, v)) // Dereference the borrowed keys and values
-    .collect();
-    
-     combined
+     let mut interface = BHyp::new();
+    let mut map = HashMap::new();
+
+    for bhyp_node in self.combined_interface_nodes() {
+        let iface_node = interface.add_node();
+        map.insert(iface_node, bhyp_node);
     }
+
+    map
+}
 
     /// Map an input interface node to its corresponding node in the main bhyp
     pub fn map_input_node(&self, interface_node: NodeId) -> Option<NodeId> {
