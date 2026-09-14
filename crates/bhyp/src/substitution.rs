@@ -12,7 +12,7 @@ use crate::bhyp::{BHyp, BHyp_with_interface, EdgeId, Label, NodeId, SourceWithBi
 use crate::categorical::{
     BHypMorphism, CategoricalError, Span, 
     are_isomorphic, find_all_occurrences,
-    compute_coproduct, compute_pushout, compute_pushout_complement, dpo
+    compute_coproduct, identity_span,compute_pushout, compute_pushout_complement, dpo
 };
 use crate::copy::{compute_n_copies, copy_subhypergraph, compute_n_copies_with_interface};
 // use crate::safety::{is_safe};
@@ -152,11 +152,11 @@ impl Substitution {
 /// - n = multiplicity of M in G
 /// - K = shared variables
 /// - n·T̂ = n copies of T glued along free vertices
-pub fn apply_substitution(
+pub fn apply_substitution_span(
     g: &BHyp_with_interface,
     subst: &Substitution,
     shared: &Span,
-) -> Result<BHyp_with_interface, SubstitutionError> {
+) -> Result<Span, SubstitutionError> {
     // ---------------------------------------------------------------------
     // 1. Find all occurrences of M in G.
     // ---------------------------------------------------------------------
@@ -168,7 +168,9 @@ pub fn apply_substitution(
     let n = occurrences.len();
 
     if n == 0 {
-        return Ok(g.clone());
+        // identity span 
+        let g_span = identity_span(&g.bhyp());
+        return Ok(g_span);
     }
 
     let i_m = BHyp_with_interface::from_bhyp(met.clone());
@@ -284,7 +286,7 @@ pub fn apply_substitution(
         )));
     }
 
-    println!("here! created n copies of M");
+
 
     // ---------------------------------------------------------------------
     // 3. Build n·T̂.
@@ -350,8 +352,6 @@ pub fn apply_substitution(
         )));
     }
 
-    println!("here! compute n copies of T, glued");
-
     // ---------------------------------------------------------------------
     // 4. Build objects in the top span.
     //
@@ -373,7 +373,6 @@ pub fn apply_substitution(
 
     let nim_k = &nim_k_result.pushout;
 
-    println!("here! created top-span objects");
 
     // ---------------------------------------------------------------------
     // 5. Construct to_l:
@@ -454,7 +453,7 @@ pub fn apply_substitution(
     )
     .map_err(|e| SubstitutionError::InvalidConstruction(e.to_string()))?;
 
-    println!("here! created to_l");
+
 
     // ---------------------------------------------------------------------
     // 6. Construct to_r:
@@ -607,7 +606,7 @@ pub fn apply_substitution(
     )
     .map_err(|e| SubstitutionError::InvalidConstruction(e.to_string()))?;
 
-    println!("here! created to_r");
+
 
     let top_span = Span {
         left: nm_k.clone(),
@@ -617,7 +616,6 @@ pub fn apply_substitution(
         to_r: to_r_morph,
     };
 
-    println!("here! created top span");
 
     // ---------------------------------------------------------------------
     // 7. Construct matching morphism:
@@ -751,20 +749,7 @@ pub fn apply_substitution(
     )
     .map_err(|e| SubstitutionError::InvalidConstruction(e.to_string()))?;
 
-    println!("here! created matching");
 
-    // Optional debug check.
-    eprintln!("--- boundary consistency check ---");
-
-    for (&middle_node, &left_node) in top_span.to_l.on_nodes() {
-        let g_node = match_morphism.map_node(left_node);
-        let right_node = top_span.to_r.map_node(middle_node);
-
-        eprintln!(
-            "middle {:?} -> left {:?} -> G {:?}; middle {:?} -> right {:?}",
-            middle_node, left_node, g_node, middle_node, right_node
-        );
-    }
 
     // ---------------------------------------------------------------------
     // 8. Apply DPO.
@@ -775,325 +760,22 @@ pub fn apply_substitution(
             SubstitutionError::InvalidConstruction(format!("DPO Failed: {:?}", e))
         })?;
 
-    println!("here! applied dpo");
+    Ok(result_span)
 
-    Ok(BHyp_with_interface::from_bhyp(result_span.right))
+    //Ok(BHyp_with_interface::from_bhyp(result_span.right))
 }
 
-// pub fn apply_substitution(
-//     g: &BHyp_with_interface,
-//     subst: &Substitution,
-//     shared: &Span, // I_G <- K -> I_T
-// ) -> Result<BHyp_with_interface, SubstitutionError> {
-    
-//     // 1. Find all occurrences of M in G
-//     let met = construct_meta_hypergraph(subst.meta_name.clone())
-//         .map_err(|e| SubstitutionError::InvalidConstruction(e))?;
-    
-//     let occurrences = find_all_occurrences(&met, &g.bhyp());
-//     let n = occurrences.len();
-    
-//     if n == 0 {
-//         return Ok(g.clone());
-//     }
-    
-//     let i_m = BHyp_with_interface::from_bhyp(met.clone());
-    
-//     // 2. Build n copies of M 
-//     let empty_k = BHyp::new();
-//     let empty_morphism = BHypMorphism::new(
-//         empty_k.clone(),
-//         met.clone(),
-//         HashMap::new(), 
-//         HashMap::new(),
-//     ).map_err(|e| SubstitutionError::InvalidConstruction(e.to_string()))?;
+pub fn apply_substitution(
+    g: &BHyp_with_interface,
+    subst: &Substitution,
+    shared: &Span,
+) -> Result<BHyp_with_interface, SubstitutionError>
+{
+    let res = apply_substitution_span(g, subst, shared).unwrap();
 
-//     let (n_m, _proj) = compute_n_copies_with_interface(
-//         &i_m, 
-//         n, 
-//         Some((empty_k.clone(), empty_morphism))
-//     ).map_err(|e| SubstitutionError::InvalidConstruction(format!("{:?}", e)))?;
+    Ok(BHyp_with_interface::from_bhyp(res.right))
 
-//     // 3. Compute n T, glued at free vertices (I_T \ im(interface_map))
-//     // 
-//     // interface_map maps M's nodes -> T's internal nodes
-//     // We need to find which T internal nodes are NOT in the image,
-//     // then find their corresponding interface nodes for gluing.
-    
-//     let m_image_in_t: HashSet<NodeId> = subst.interface_map.values().cloned().collect();
-    
-//     // Build reverse maps: T internal node -> interface node
-//     let mut t_node_to_input_iface: HashMap<NodeId, NodeId> = HashMap::new();
-//     let mut t_node_to_output_iface: HashMap<NodeId, NodeId> = HashMap::new();
-    
-//     for (&iface_node, &t_node) in subst.replacement.input_map() {
-//         t_node_to_input_iface.insert(t_node, iface_node);
-//     }
-//     for (&iface_node, &t_node) in subst.replacement.output_map() {
-//         t_node_to_output_iface.insert(t_node, iface_node);
-//     }
-    
-//     // Collect all T internal nodes that have interface mappings
-//     let t_interface_internal_nodes: HashSet<NodeId> = subst.replacement.input_map()
-//         .values()
-//         .chain(subst.replacement.output_map().values())
-//         .copied()
-//         .collect();
-    
-//     // Build i_f: the free vertices (T internal nodes not in image of interface_map)
-//     // These need to be glued across copies
-//     let mut i_f = BHyp::new();
-//     let mut i_f_map_nodes: HashMap<NodeId, NodeId> = HashMap::new();
-    
-//     for &t_internal_node in &t_interface_internal_nodes {
-//         if !m_image_in_t.contains(&t_internal_node) {
-//             // This is a free vertex - add to gluing interface
-//             let i_f_node = i_f.add_node();
-//             i_f_map_nodes.insert(i_f_node, t_internal_node);
-//         }
-//     }
-
-//     let kt_to_t = BHypMorphism::new(
-//         i_f.clone(),
-//         subst.replacement.bhyp().clone(),
-//         i_f_map_nodes,
-//         HashMap::new(), 
-//     ).map_err(|e| SubstitutionError::InvalidConstruction(e.to_string()))?;
-
-//     let (n_t_glued, _t_proj) = compute_n_copies_with_interface(
-//         &subst.replacement,
-//         n,
-//         Some((i_f, kt_to_t))
-//     ).map_err(|e| SubstitutionError::InvalidConstruction(format!("{:?}", e)))?;
-        
-//     // 4. Compute the objects for the top span n M + K <- n Im + K -> n T 
-//     // n·I_M 
-//     let nim_result = compute_coproduct(n_m.input_interface(), n_m.output_interface())
-//         .map_err(|e| SubstitutionError::InvalidConstruction(format!("{:?}", e)))?;
-//     let nim_graph = &nim_result.pushout;
-
-//     // n·M ⊔ K
-//     let nm_k_result = compute_coproduct(n_m.bhyp(), &shared.middle)
-//         .map_err(|e| SubstitutionError::InvalidConstruction(format!("{:?}", e)))?;
-//     let nm_k = &nm_k_result.pushout;
-
-//     // n·I_M ⊔ K
-//     let nim_k_result = compute_coproduct(nim_graph, &shared.middle)
-//         .map_err(|e| SubstitutionError::InvalidConstruction(format!("{:?}", e)))?;
-//     let nim_k = &nim_k_result.pushout;
-
-//     // 5. Construct `to_l`: (n·I_M ⊔ K) -> (n·M ⊔ K)
-//     let mut to_l_nodes = HashMap::new();
-    
-//     for (&nim_n, &nim_k_n) in nim_k_result.morphism_from_b.on_nodes() {
-//         let nm_n = if let Some((&in_n, _)) = nim_result.morphism_from_b.on_nodes().iter().find(|(_, &v)| v == nim_n) {
-//             n_m.input_map()[&in_n]
-//         } else if let Some((&out_n, _)) = nim_result.morphism_from_c.on_nodes().iter().find(|(_, &v)| v == nim_n) {
-//             n_m.output_map()[&out_n]
-//         } else {
-//             return Err(SubstitutionError::InvalidConstruction(
-//                 format!("Node {:?} not found in nim_result mappings", nim_n)
-//             ));
-//         };
-//         let final_nm_k_n = nm_k_result.morphism_from_b.map_node(nm_n)
-//             .ok_or_else(|| SubstitutionError::InvalidConstruction(
-//                 format!("Node {:?} has no mapping in nm_k_result", nm_n)
-//             ))?;
-//         to_l_nodes.insert(nim_k_n, final_nm_k_n);
-//     }
-    
-//     for (&k_n, &nim_k_n) in nim_k_result.morphism_from_c.on_nodes() {
-//         let final_nm_k_n = nm_k_result.morphism_from_c.map_node(k_n)
-//             .ok_or_else(|| SubstitutionError::InvalidConstruction(
-//                 format!("K node {:?} has no mapping in nm_k_result", k_n)
-//             ))?;
-//         to_l_nodes.insert(nim_k_n, final_nm_k_n);
-//     }
-
-//     let to_l_morph = BHypMorphism::new(nim_k.clone(), nm_k.clone(), to_l_nodes, HashMap::new())
-//         .map_err(|e| SubstitutionError::InvalidConstruction(e.to_string()))?;
-
-//     // 6. Construct `to_r`: (n·I_M ⊔ K) -> n·T̂
-//     // 6. Construct `to_r`: (n·I_M ⊔ K) -> n·T̂
-// let mut to_r_nodes = HashMap::new();
-
-// // Find inclusions of T into n_t_glued
-// let t_incl = find_all_occurrences(&subst.replacement.bhyp(), &n_t_glued.bhyp());
-
-// if t_incl.len() != n {
-//     return Err(SubstitutionError::InvalidConstruction(
-//         format!("Expected {} occurrences of T in n_t_glued, found {}", n, t_incl.len())
-//     ));
-// }
-
-// // We need to map: for each copy i, for each interface node of M,
-// // find corresponding node in nim_k and map it to the corresponding node in n_t_glued
-
-// // Get the single edge in met to find sources and targets
-// let met_edge = *met.edges().iter().next().unwrap();
-// let met_sources: Vec<NodeId> = met.get_sources(met_edge).unwrap();
-// let met_targets: Vec<NodeId> = met.get_targets(met_edge).unwrap().clone();
-
-// // Build a mapping from met node -> position and type (source idx or target idx)
-// #[derive(Debug, Clone, Copy)]
-// enum MetNodePosition {
-//     Source(usize),
-//     Target(usize),
-// }
-
-// let mut met_node_positions: HashMap<NodeId, MetNodePosition> = HashMap::new();
-// for (idx, src) in met_sources.iter().enumerate() {
-//     met_node_positions.insert(*src, MetNodePosition::Source(idx));
-// }
-// for (idx, tgt) in met_targets.iter().enumerate() {
-//     met_node_positions.insert(*tgt, MetNodePosition::Target(idx));
-// }
-
-// // Now for each copy i
-// for i in 0..n {
-//     let t_inj = &t_incl[i];
-    
-//     // For each mapped node in interface_map
-//     for (&m_node, &t_internal_node) in &subst.interface_map {
-//         let pos = match met_node_positions.get(&m_node) {
-//             Some(p) => p,
-//             None => continue, // Not an interface node
-//         };
-        
-//         // Find the corresponding node in nim for copy i
-//         // This depends on how compute_n_copies_with_interface orders copies
-//         // We need to use the projection morphisms from that function
-        
-//         // n_m.input_interface has nodes for all copies
-//         // n_m.input_map maps interface_node -> n_m internal node
-//         // We need to find the i-th copy's version of m_node
-        
-//         // The interface of i_m (single M) has certain nodes
-//         // After n copies, n_m.input_interface has n times as many nodes
-        
-//         let i_m_input_nodes: Vec<NodeId> = i_m.input_interface().nodes().iter().copied().collect();
-//         let i_m_output_nodes: Vec<NodeId> = i_m.output_interface().nodes().iter().copied().collect();
-        
-//         let nim_n = match pos {
-//             MetNodePosition::Source(src_idx) => {
-//                 // Find the interface node in i_m that maps to this source
-//                 let i_m_iface_node = i_m_input_nodes.iter().find(|&&iface_n| {
-//                     i_m.input_map().get(&iface_n) == Some(&m_node)
-//                 });
-                
-//                 if let Some(&iface_n) = i_m_iface_node {
-//                     // Now find the corresponding node in n_m for copy i
-//                     // This is where we need the projection info
-//                     // For now, assume nodes are ordered: copy 0's nodes, then copy 1's, etc.
-//                     let n_m_input_nodes: Vec<NodeId> = n_m.input_interface().nodes().iter().copied().collect();
-//                     let nodes_per_copy = i_m_input_nodes.len();
-//                     let n_m_iface_node = n_m_input_nodes.get(i * nodes_per_copy + src_idx)ok_;
-                    
-//                     // Map through nim_result
-//                     nim_result.morphism_from_b.map_node(*n_m_iface_node)
-//                 } else {
-//                     None
-//                 }
-//             }
-//             MetNodePosition::Target(tgt_idx) => {
-//                 let i_m_iface_node = i_m_output_nodes.iter().find(|&&iface_n| {
-//                     i_m.output_map().get(&iface_n) == Some(&m_node)
-//                 });
-                
-//                 if let Some(&iface_n) = i_m_iface_node {
-//                     let n_m_output_nodes: Vec<NodeId> = n_m.output_interface().nodes().iter().copied().collect();
-//                     let nodes_per_copy = i_m_output_nodes.len();
-//                     let n_m_iface_node = n_m_output_nodes.get(i * nodes_per_copy + tgt_idx)?;
-                    
-//                     nim_result.morphism_from_c.map_node(*n_m_iface_node)
-//                 } else {
-//                     None
-//                 }
-//             }
-//         };
-        
-//         if let Some(nim_n) = nim_n {
-//             if let Some(nim_k_n) = nim_k_result.morphism_from_b.map_node(nim_n) {
-//                 if let Some(nt_n) = t_inj.map_node(t_internal_node) {
-//                     to_r_nodes.insert(nim_k_n, nt_n);
-//                 }
-//             }
-//         }
-//     }
-// }
-
-// // Map K nodes
-// for (&k_n, &nim_k_n) in nim_k_result.morphism_from_c.on_nodes() {
-//     let nt_n = shared.to_r.map_node(k_n)
-//         .ok_or_else(|| SubstitutionError::InvalidConstruction(
-//             format!("K node {:?} has no mapping in shared.to_r", k_n)
-//         ))?;
-//     to_r_nodes.insert(nim_k_n, nt_n);
-// }
-
-
-
-//     let to_r_morph = BHypMorphism::new(nim_k.clone(), n_t_glued.bhyp().clone(), to_r_nodes, HashMap::new())
-//         .map_err(|e| SubstitutionError::InvalidConstruction(e.to_string()))?;
-
-//     let top_span = Span {
-//         left: nm_k.clone(),
-//         middle: nim_k.clone(),
-//         right: n_t_glued.bhyp().clone(),
-//         to_l: to_l_morph,
-//         to_r: to_r_morph
-//     };
-
-//     // 7. Construct matching morphism: n·M ⊔ K -> G
-//     let mut match_nodes = HashMap::new();
-//     let mut match_edges = HashMap::new();
-
-//     for (&k_n, &nm_k_n) in nm_k_result.morphism_from_c.on_nodes() {
-//         match_nodes.insert(nm_k_n, shared.to_l.map_node(k_n)
-//             .ok_or_else(|| SubstitutionError::InvalidConstruction(
-//                 format!("K node {:?} has no mapping in shared.to_l", k_n)
-//             ))?);
-//     }
-//     for (&k_e, &nm_k_e) in nm_k_result.morphism_from_c.on_edges() {
-//         match_edges.insert(nm_k_e, shared.to_l.map_edge(k_e)
-//             .ok_or_else(|| SubstitutionError::InvalidConstruction(
-//                 format!("K edge {:?} has no mapping in shared.to_l", k_e)
-//             ))?);
-//     }
-
-//     for (_i, occ) in occurrences.iter().enumerate() {
-//         for &m_n in occ.domain().nodes() {
-//             let nm_n = occ.map_node(m_n).ok_or_else(|| SubstitutionError::InvalidConstruction(
-//                 format!("M node {:?} has no mapping in occurrence", m_n)
-//             ))?;
-//             let nm_k_n = nm_k_result.morphism_from_b.map_node(nm_n)
-//                 .ok_or_else(|| SubstitutionError::InvalidConstruction(
-//                     format!("n_m node {:?} has no mapping in nm_k_result", nm_n)
-//                 ))?;
-//             match_nodes.insert(nm_k_n, occ.map_node(m_n).unwrap());
-//         }
-//         for &m_e in occ.domain().edges() {
-//             let nm_e = occ.map_edge(m_e).ok_or_else(|| SubstitutionError::InvalidConstruction(
-//                 format!("M edge {:?} has no mapping in occurrence", m_e)
-//             ))?;
-//             let nm_k_e = nm_k_result.morphism_from_b.map_edge(nm_e)
-//                 .ok_or_else(|| SubstitutionError::InvalidConstruction(
-//                     format!("n_m edge {:?} has no mapping in nm_k_result", nm_e)
-//                 ))?;
-//             match_edges.insert(nm_k_e, occ.map_edge(m_e).unwrap());
-//         }
-//     }
-
-//     let match_morphism = BHypMorphism::new(nm_k.clone(), g.bhyp().clone(), match_nodes, match_edges)
-//         .map_err(|e| SubstitutionError::InvalidConstruction(e.to_string()))?;
-
-//     // 8. Apply DPO
-//     let result_span = dpo(&top_span, g.bhyp(), &match_morphism)
-//         .map_err(|e| SubstitutionError::InvalidConstruction(format!("DPO Failed: {:?}", e)))?;
-
-//     Ok(BHyp_with_interface::from_bhyp(result_span.right))
-// }
-
+}
 #[cfg(test)]
 mod subst_tests {
     use super::*;

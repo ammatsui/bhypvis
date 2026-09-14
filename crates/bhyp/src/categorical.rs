@@ -2096,32 +2096,9 @@ pub fn dpo(span: &Span, g: &BHyp, m: &BHypMorphism) ->
     let pc = compute_pushout_complement(&span.to_l, m).unwrap();
     let pc = compute_pushout_complement(&span.to_l, m).unwrap();
 
-println!("--- pushout complement boundary check ---");
-for k_node in span.middle.nodes() {
-    let l_node = span.to_l.map_node(*k_node);
-    let g_node = l_node.and_then(|n| m.map_node(n));
-    let d_node = pc.morphism_from_k.map_node(*k_node);
 
-    println!(
-        "K {:?} -> L {:?} -> G {:?}; K -> D {:?}",
-        k_node, l_node, g_node, d_node
-    );
-}
     let result = compute_pushout(&span.to_r, &pc.morphism_from_k).unwrap();
     
-    println!("--- final pushout relations ---");
-for k_node in span.middle.nodes() {
-    let r_node = span.to_r.map_node(*k_node);
-    let d_node = pc.morphism_from_k.map_node(*k_node);
-
-    let h_from_r = r_node.and_then(|n| result.morphism_from_b.map_node(n));
-    let h_from_d = d_node.and_then(|n| result.morphism_from_c.map_node(n));
-
-    println!(
-        "K {:?}: R {:?} -> H {:?}; D {:?} -> H {:?}",
-        k_node, r_node, h_from_r, d_node, h_from_d
-    );
-}
 
     Ok(Span {
         left : g.clone(),
@@ -2151,6 +2128,17 @@ pub fn compute_coproduct(
 
 }
 
+
+pub fn identity_span(g: &BHyp) -> Span {
+    let id = identity_morphism(g);
+    Span {
+        left: g.clone(),
+        middle: g.clone(),
+        right: g.clone(),
+        to_l: id.clone(),
+        to_r: id,
+    }
+}
 
 /// Check if two BHyp instances are isomorphic
 pub fn are_isomorphic(g1: &BHyp, g2: &BHyp) -> bool {
