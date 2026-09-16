@@ -1243,6 +1243,113 @@ use super::*;
 mod rewrite_tests {
     use super::*;
 
+    use crate::visualisation::{
+        bhyp_to_dot_with_name,
+        morphism_to_dot_with_labels,
+        DotConfig,
+    };
+
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::process::Command;
+
+    fn test_image_dir(test_name: &str) -> PathBuf {
+        let dir = PathBuf::from("images").join(test_name);
+        fs::create_dir_all(&dir).expect("failed to create image directory");
+        dir
+    }
+
+    fn save_dot_and_png(dir: &Path, name: &str, dot: String) {
+        let dot_path = dir.join(format!("{}.dot", name));
+        let png_path = dir.join(format!("{}.png", name));
+
+        fs::write(&dot_path, dot).expect("failed to write dot file");
+
+        let output = Command::new("dot")
+            .arg("-Tpng")
+            .arg(&dot_path)
+            .arg("-o")
+            .arg(&png_path)
+            .output();
+
+        match output {
+            Ok(output) if output.status.success() => {}
+            Ok(output) => {
+                eprintln!(
+                    "GraphViz dot failed for {:?}: {}",
+                    dot_path,
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+            Err(err) => {
+                eprintln!(
+                    "Could not run GraphViz dot for {:?}: {}. Dot file was still written.",
+                    dot_path,
+                    err
+                );
+            }
+        }
+    }
+
+    fn save_bhyp_image(test_name: &str, graph_name: &str, graph: &BHyp) {
+        let dir = test_image_dir(test_name);
+        let config = DotConfig::with_node_ids();
+
+        save_dot_and_png(
+            &dir,
+            graph_name,
+            bhyp_to_dot_with_name(graph, graph_name, &config),
+        );
+    }
+
+    fn save_morphism_image(
+        test_name: &str,
+        graph_name: &str,
+        morphism: &BHypMorphism,
+        domain_label: &str,
+        codomain_label: &str,
+        morphism_label: &str,
+    ) {
+        let dir = test_image_dir(test_name);
+        let config = DotConfig::with_node_ids();
+
+        save_dot_and_png(
+            &dir,
+            graph_name,
+            morphism_to_dot_with_labels(
+                morphism,
+                domain_label,
+                codomain_label,
+                morphism_label,
+                &config,
+            ),
+        );
+    }
+
+    fn save_span_images(test_name: &str, prefix: &str, span: &Span) {
+        save_bhyp_image(test_name, &format!("{}_left", prefix), &span.left);
+        save_bhyp_image(test_name, &format!("{}_middle", prefix), &span.middle);
+        save_bhyp_image(test_name, &format!("{}_right", prefix), &span.right);
+
+        save_morphism_image(
+            test_name,
+            &format!("{}_to_l", prefix),
+            &span.to_l,
+            "K",
+            "L",
+            "to_l",
+        );
+
+        save_morphism_image(
+            test_name,
+            &format!("{}_to_r", prefix),
+            &span.to_r,
+            "K",
+            "R",
+            "to_r",
+        );
+    }
+
 
     fn labels(g: &BHyp) -> Vec<Label> {
         g.edges()
@@ -1261,6 +1368,7 @@ mod rewrite_tests {
 
     #[test]
     fn test_example_beta_rule_instance_v_to_lambda_x_tx() {
+        let test_name = "test_example_beta_rule_instance_v_to_lambda_x_tx";
         // This is the paper-style example:
         //
         //     app(λ x. M[x], V)  <- K ->  M[V]
@@ -1336,6 +1444,8 @@ mod rewrite_tests {
         )
         .unwrap();
 
+        save_bhyp_image(test_name, "rule_L_before_instantiation", &l);
+
         // ------------------------------------------------------------------
         // Build R = M[V]
         // ------------------------------------------------------------------
@@ -1359,6 +1469,8 @@ mod rewrite_tests {
             Some(m.clone()),
         )
         .unwrap();
+        
+        save_bhyp_image(test_name, "rule_R_before_instantiation", &r);
 
         // ------------------------------------------------------------------
         // Build K.
@@ -1393,11 +1505,13 @@ mod rewrite_tests {
             to_l,
             to_r,
         };
-
+        save_span_images(test_name, "rule_span_before_instantiation", &rule_span);
+        
         let rule = RewriteRule::new(rule_span).unwrap();
 
         assert!(rule.metavariables().contains(&m));
         assert!(rule.metavariables().contains(&v));
+
 
         // ------------------------------------------------------------------
         // Build replacement T = λ x. t(x)
@@ -1468,7 +1582,21 @@ mod rewrite_tests {
 
         let rule_subst = rule_substitution_no_sharing(substitution, rule.left(), rule.right())
             .unwrap();
+        
+        save_bhyp_image(test_name, "substitution_T_lambda_x_tx", &t_graph);
+        save_bhyp_image(test_name, "canonical_meta_graph_V", &v_meta_graph);
 
+        save_span_images(
+            test_name,
+            "substitution_shared_for_left",
+            &rule_subst.shared_for_left,
+        );
+
+        save_span_images(
+            test_name,
+            "substitution_shared_for_right",
+            &rule_subst.shared_for_right,
+        );
         // ------------------------------------------------------------------
         // Instantiate the rule.
         // ------------------------------------------------------------------
@@ -1508,6 +1636,24 @@ mod rewrite_tests {
         assert_eq!(count_label(inst.right(), &t_label), 1);
         assert_eq!(count_label(inst.right(), &m), 1);
         assert_eq!(count_label(inst.right(), &v), 0);
+
+        save_span_images(
+            test_name,
+            "instantiated_rule_span",
+            inst.span(),
+        );
+
+        save_bhyp_image(
+            test_name,
+            "instantiated_L_after_substitution",
+            inst.left(),
+        );
+
+        save_bhyp_image(
+            test_name,
+            "instantiated_R_after_substitution",
+            inst.right(),
+        );
 
         // ------------------------------------------------------------------
         // Optional stronger checks: compare against manually built expected

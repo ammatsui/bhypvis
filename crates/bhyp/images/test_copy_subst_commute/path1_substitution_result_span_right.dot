@@ -1,0 +1,40 @@
+digraph path1_substitution_result_span_right {
+  fontname="Helvetica"
+  fontsize=12
+  rankdir=LR;
+  node [fontname="Helvetica", fontsize=12];
+  edge [fontname="Helvetica", fontsize=12];
+
+  // Nodes
+  n3 [label="3", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+  n7 [label="7", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+  n4 [label="4", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+  n2 [label="2", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+  n6 [label="6", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+  n1 [label="1", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+  n5 [label="5", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+  n0 [label="0", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+
+  // Hyperedges
+  e0 [label="T", shape=box, style=rounded, color="black"];
+  e1 [label="T", shape=box, style=rounded, color="black"];
+  e3 [label="G1", shape=box, style=rounded, color="black"];
+  e2 [label="G2", shape=box, style=rounded, color="black"];
+
+  // Source connections
+  n0 -> e0 [label="0"];
+  n1 -> e0 [label="1"];
+  n2 -> e0 [label="2"];
+  n0 -> e1 [label="0"];
+  n1 -> e1 [label="1"];
+  n2 -> e1 [label="2"];
+  n3 -> e3 [label=""];
+  n3 -> e2 [label="0"];
+  n5 -> e2 [label="1"];
+
+  // Target connections
+  e0 -> n3 [label=""];
+  e1 -> n4 [label=""];
+  e3 -> n6 [label=""];
+  e2 -> n7 [label=""];
+}

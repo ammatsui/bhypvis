@@ -1,0 +1,15 @@
+digraph substitution_shared_for_right_middle {
+  fontname="Helvetica"
+  fontsize=12
+  rankdir=LR;
+  node [fontname="Helvetica", fontsize=12];
+  edge [fontname="Helvetica", fontsize=12];
+
+  // Nodes
+
+  // Hyperedges
+
+  // Source connections
+
+  // Target connections
+}

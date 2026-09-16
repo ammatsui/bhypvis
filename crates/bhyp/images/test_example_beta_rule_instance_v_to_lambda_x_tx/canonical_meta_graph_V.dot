@@ -1,0 +1,18 @@
+digraph canonical_meta_graph_V {
+  fontname="Helvetica"
+  fontsize=12
+  rankdir=LR;
+  node [fontname="Helvetica", fontsize=12];
+  edge [fontname="Helvetica", fontsize=12];
+
+  // Nodes
+  n0 [label="0", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+
+  // Hyperedges
+  e0 [label="V:0", shape=ellipse, style=rounded, color="orange"];
+
+  // Source connections
+
+  // Target connections
+  e0 -> n0 [label=""];
+}

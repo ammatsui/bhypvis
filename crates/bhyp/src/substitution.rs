@@ -780,6 +780,129 @@ pub fn apply_substitution(
 mod subst_tests {
     use super::*;
 
+    use crate::visualisation::{
+    bhyp_to_dot_with_name,
+    bhyp_with_interface_to_dot,
+    morphism_to_dot_with_labels,
+    DotConfig,
+};
+
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+fn test_image_dir(test_name: &str) -> PathBuf {
+    let dir = PathBuf::from("images").join(test_name);
+    fs::create_dir_all(&dir).expect("failed to create image directory");
+    dir
+}
+
+fn save_dot_and_png(dir: &Path, name: &str, dot: String) {
+    let dot_path = dir.join(format!("{}.dot", name));
+    let png_path = dir.join(format!("{}.png", name));
+
+    fs::write(&dot_path, dot).expect("failed to write dot file");
+
+    let output = Command::new("dot")
+        .arg("-Tpng")
+        .arg(&dot_path)
+        .arg("-o")
+        .arg(&png_path)
+        .output();
+
+    match output {
+        Ok(output) if output.status.success() => {}
+        Ok(output) => {
+            eprintln!(
+                "GraphViz dot failed for {:?}: {}",
+                dot_path,
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        Err(err) => {
+            eprintln!(
+                "Could not run GraphViz dot for {:?}: {}. Dot file was still written.",
+                dot_path,
+                err
+            );
+        }
+    }
+}
+
+fn save_bhyp_image(test_name: &str, graph_name: &str, graph: &BHyp) {
+    let dir = test_image_dir(test_name);
+    let config = DotConfig::with_node_ids();
+
+    save_dot_and_png(
+        &dir,
+        graph_name,
+        bhyp_to_dot_with_name(graph, graph_name, &config),
+    );
+}
+
+fn save_bhyp_with_interface_image(
+    test_name: &str,
+    graph_name: &str,
+    graph: &BHyp_with_interface,
+) {
+    let dir = test_image_dir(test_name);
+    let config = DotConfig::with_node_ids();
+
+    save_dot_and_png(
+        &dir,
+        graph_name,
+        bhyp_with_interface_to_dot(graph, &config),
+    );
+}
+
+fn save_morphism_image(
+    test_name: &str,
+    graph_name: &str,
+    morphism: &BHypMorphism,
+    domain_label: &str,
+    codomain_label: &str,
+    morphism_label: &str,
+) {
+    let dir = test_image_dir(test_name);
+    let config = DotConfig::with_node_ids();
+
+    save_dot_and_png(
+        &dir,
+        graph_name,
+        morphism_to_dot_with_labels(
+            morphism,
+            domain_label,
+            codomain_label,
+            morphism_label,
+            &config,
+        ),
+    );
+}
+
+fn save_span_images(test_name: &str, prefix: &str, span: &Span) {
+    save_bhyp_image(test_name, &format!("{}_left", prefix), &span.left);
+    save_bhyp_image(test_name, &format!("{}_middle", prefix), &span.middle);
+    save_bhyp_image(test_name, &format!("{}_right", prefix), &span.right);
+
+    save_morphism_image(
+        test_name,
+        &format!("{}_to_l", prefix),
+        &span.to_l,
+        "middle",
+        "left",
+        "to_l",
+    );
+
+    save_morphism_image(
+        test_name,
+        &format!("{}_to_r", prefix),
+        &span.to_r,
+        "middle",
+        "right",
+        "to_r",
+    );
+}
+
     #[test]
     fn test_construct_meta_hypergraph_arity_0() {
         let label = Label::Meta("X".to_string(), 0);
@@ -970,9 +1093,10 @@ interface_map.insert(m_target, t_out_iface);
         assert_eq!(subst.meta_name, Label::Meta("M".to_string(), 1));
         assert_eq!(subst.interface_map, map);
     }
-
 #[test]
 fn test_copy_subst_commute() {
+    let test_name = "test_copy_subst_commute";
+
     // create G
     let mut g = BHyp::new();
     let m1 = g.add_node();
@@ -983,15 +1107,19 @@ fn test_copy_subst_commute() {
     let go2 = g.add_node();
 
     g.add_edge(
-        vec![SourceWithBinding { source: m1, bound: vec![] }, 
-        SourceWithBinding { source: m2, bound: vec![] }],
+        vec![
+            SourceWithBinding { source: m1, bound: vec![] },
+            SourceWithBinding { source: m2, bound: vec![] },
+        ],
         vec![mo],
         Some(Label::Meta("M".to_string(), 2)),
     ).unwrap();
 
     g.add_edge(
-        vec![SourceWithBinding { source: mo, bound: vec![] }, 
-        SourceWithBinding { source: g1, bound: vec![] }],
+        vec![
+            SourceWithBinding { source: mo, bound: vec![] },
+            SourceWithBinding { source: g1, bound: vec![] },
+        ],
         vec![go2],
         Some(Label::Symbol("G2".to_string())),
     ).unwrap();
@@ -1002,78 +1130,84 @@ fn test_copy_subst_commute() {
         Some(Label::Symbol("G1".to_string())),
     ).unwrap();
 
-    // create subhyp M (matching structure in G)
+    save_bhyp_image(test_name, "G_original", &g);
+
+    // create subhyp M
     let mut m = BHyp::new();
     let m_n1 = m.add_node();
     let m_n2 = m.add_node();
     let m_out = m.add_node();
-    
+
     m.add_edge(
-        vec![SourceWithBinding { source: m_n1, bound: vec![] }, 
-        SourceWithBinding { source: m_n2, bound: vec![] }],
+        vec![
+            SourceWithBinding { source: m_n1, bound: vec![] },
+            SourceWithBinding { source: m_n2, bound: vec![] },
+        ],
         vec![m_out],
         Some(Label::Meta("M".to_string(), 2)),
     ).unwrap();
 
-    // create replacement T 
+    save_bhyp_image(test_name, "M_subhypergraph", &m);
+
+    // create replacement T
     let mut t = BHyp::new();
     let t1 = t.add_node();
     let t2 = t.add_node();
     let t3 = t.add_node();
     let t_out = t.add_node();
-    
+
     t.add_edge(
-        vec![SourceWithBinding {source: t1, bound: vec![]},
-        SourceWithBinding {source: t2, bound: vec![]},
-        SourceWithBinding {source: t3, bound: vec![]}], 
-        vec![t_out], 
+        vec![
+            SourceWithBinding { source: t1, bound: vec![] },
+            SourceWithBinding { source: t2, bound: vec![] },
+            SourceWithBinding { source: t3, bound: vec![] },
+        ],
+        vec![t_out],
         Some(Label::Symbol("T".to_string())),
     ).unwrap();
 
-    // Create T with interface
-    let t_with_interface = BHyp_with_interface::from_bhyp(
-        t.clone());
+    save_bhyp_image(test_name, "T_replacement", &t);
 
-    // Create interface map: M's nodes -> T's nodes; on the interface level
+    let t_with_interface = BHyp_with_interface::from_bhyp(t.clone());
 
-// Get the interface nodes (not t1, t2, t_out directly!)
-let t_input_interface_nodes: Vec<NodeId> = t_with_interface.input_interface().nodes().iter().copied().collect();
-let t_output_interface_nodes: Vec<NodeId> = t_with_interface.output_interface().nodes().iter().copied().collect();
+    save_bhyp_with_interface_image(
+        test_name,
+        "T_replacement_with_interface",
+        &t_with_interface,
+    );
 
-// Map met nodes to T's INTERFACE nodes
-let met = construct_meta_hypergraph(Label::Meta("M".to_string(), 2)).unwrap();
-let met_edge = met.edges().iter().next().unwrap();
-let met_sources = met.get_sources(*met_edge).unwrap();
-let met_targets = met.get_targets(*met_edge).unwrap();
+    let met = construct_meta_hypergraph(Label::Meta("M".to_string(), 2)).unwrap();
 
-let mut interface_map = HashMap::new();
-// Need to find which interface nodes correspond to t1, t2, t_out
-// by looking at input_map and output_map
-for (&iface_node, &t_node) in t_with_interface.input_map() {
-    if t_node == t1 {
-        interface_map.insert(met_sources[0], iface_node);
-    } else if t_node == t2 {
-        interface_map.insert(met_sources[1], iface_node);
+    save_bhyp_image(test_name, "M_canonical_meta_hypergraph", &met);
+
+    let met_edge = met.edges().iter().next().unwrap();
+    let met_sources = met.get_sources(*met_edge).unwrap();
+    let met_targets = met.get_targets(*met_edge).unwrap();
+
+    let mut interface_map = HashMap::new();
+
+    for (&iface_node, &t_node) in t_with_interface.input_map() {
+        if t_node == t1 {
+            interface_map.insert(met_sources[0], iface_node);
+        } else if t_node == t2 {
+            interface_map.insert(met_sources[1], iface_node);
+        }
     }
-}
-for (&iface_node, &t_node) in t_with_interface.output_map() {
-    if t_node == t_out {
-        interface_map.insert(met_targets[0], iface_node);
-    }
-}
 
-    // Create substitution
+    for (&iface_node, &t_node) in t_with_interface.output_map() {
+        if t_node == t_out {
+            interface_map.insert(met_targets[0], iface_node);
+        }
+    }
+
     let subst = Substitution::new(
-        Label::Meta("M".to_string(), 2), 
-        t_with_interface.clone()
+        Label::Meta("M".to_string(), 2),
+        t_with_interface.clone(),
     ).with_interface_map(interface_map);
 
-    // Create shared span for copy_subhypergraph: G <- K -> M
-    // Following the pattern from copy_simple_subhyp
     let mut k = BHyp::new();
     let k_node = k.add_node();
 
-    // K -> G: maps k_node to mo (the shared output node in G)
     let to_l = BHypMorphism::new(
         k.clone(),
         g.clone(),
@@ -1081,7 +1215,6 @@ for (&iface_node, &t_node) in t_with_interface.output_map() {
         HashMap::new(),
     ).unwrap();
 
-    // K -> M: maps k_node to m_out (the output node in M)
     let to_r = BHypMorphism::new(
         k.clone(),
         m.clone(),
@@ -1097,23 +1230,34 @@ for (&iface_node, &t_node) in t_with_interface.output_map() {
         to_r,
     };
 
-    // Verify out_degree for copying (should be 2: G1 and G2 edges)
+    save_span_images(test_name, "shared_span_for_copy_M", &shared_span_for_copy);
+
     let n = g.out_degree(mo);
     assert_eq!(n, 2);
 
     // PATH 1: copy then substitute
-    // copy_subhypergraph(g, m, shared_span) - copies M at shared output node mo
     let gm_copied = copy_subhypergraph(&g, &m, shared_span_for_copy).unwrap();
 
-    assert_eq!(gm_copied.edges().len(), 4); // original 2 edges + 2 copies of M
+    save_bhyp_image(test_name, "path1_after_copy_GM", &gm_copied);
+
+    assert_eq!(gm_copied.edges().len(), 4);
     assert_eq!(gm_copied.nodes().len(), 7);
 
-    // gm_copied should now have 2 copies of M
-    // Create empty shared span for substitution
     let empty_k = BHyp::new();
-    let empty_to_gm = BHypMorphism::new(empty_k.clone(), gm_copied.clone(), HashMap::new(), HashMap::new()).unwrap();
-    let empty_to_t = BHypMorphism::new(empty_k.clone(), t.clone(), HashMap::new(), HashMap::new()).unwrap();
-    
+    let empty_to_gm = BHypMorphism::new(
+        empty_k.clone(),
+        gm_copied.clone(),
+        HashMap::new(),
+        HashMap::new(),
+    ).unwrap();
+
+    let empty_to_t = BHypMorphism::new(
+        empty_k.clone(),
+        t.clone(),
+        HashMap::new(),
+        HashMap::new(),
+    ).unwrap();
+
     let shared_span_for_subst_copied = Span {
         left: gm_copied.clone(),
         middle: empty_k.clone(),
@@ -1122,20 +1266,42 @@ for (&iface_node, &t_node) in t_with_interface.output_map() {
         to_r: empty_to_t.clone(),
     };
 
-    let gm_copied_with_interface = BHyp_with_interface::from_bhyp(gm_copied.clone());
-    let path1_result = apply_substitution(&gm_copied_with_interface, &subst, &shared_span_for_subst_copied).unwrap();
+    save_span_images(
+        test_name,
+        "path1_shared_span_for_substitution",
+        &shared_span_for_subst_copied,
+    );
 
-    assert_eq!(path1_result.bhyp().edges().len(), 4); // original 2 edges + 2 copies of T
-    assert_eq!(path1_result.bhyp().nodes().len(), 8); // todo: fix, free of T got copied
+    let gm_copied_with_interface = BHyp_with_interface::from_bhyp(gm_copied.clone());
+
+    save_bhyp_with_interface_image(
+        test_name,
+        "path1_after_copy_GM_with_interface",
+        &gm_copied_with_interface,
+    );
+
+    let path1_span = apply_substitution_span(
+        &gm_copied_with_interface,
+        &subst,
+        &shared_span_for_subst_copied,
+    ).unwrap();
+
+    save_span_images(test_name, "path1_substitution_result_span", &path1_span);
+    save_bhyp_image(test_name, "path1_result", &path1_span.right);
+
+    let path1_result = BHyp_with_interface::from_bhyp(path1_span.right.clone());
+
+    assert_eq!(path1_result.bhyp().edges().len(), 4);
+    assert_eq!(path1_result.bhyp().nodes().len(), 8);
 
     // PATH 2: substitute then copy
-    // apply_substitution(g, subst, shared_span) - replaces single M with T
     let empty_to_g = BHypMorphism::new(
-        empty_k.clone(), 
-        g.clone(), 
-        HashMap::new(), 
-        HashMap::new()).unwrap();
-    
+        empty_k.clone(),
+        g.clone(),
+        HashMap::new(),
+        HashMap::new(),
+    ).unwrap();
+
     let shared_span_for_subst = Span {
         left: g.clone(),
         middle: empty_k.clone(),
@@ -1144,27 +1310,52 @@ for (&iface_node, &t_node) in t_with_interface.output_map() {
         to_r: empty_to_t.clone(),
     };
 
+    save_span_images(
+        test_name,
+        "path2_shared_span_for_substitution",
+        &shared_span_for_subst,
+    );
+
     let g_with_interface = BHyp_with_interface::from_bhyp(g.clone());
-    let g_substituted = apply_substitution(&g_with_interface, &subst, &shared_span_for_subst).unwrap();
+
+    save_bhyp_with_interface_image(
+        test_name,
+        "path2_G_with_interface",
+        &g_with_interface,
+    );
+
+    let g_substitution_span = apply_substitution_span(
+        &g_with_interface,
+        &subst,
+        &shared_span_for_subst,
+    ).unwrap();
+
+    save_span_images(
+        test_name,
+        "path2_substitution_result_span",
+        &g_substitution_span,
+    );
+
+    let g_substituted = BHyp_with_interface::from_bhyp(g_substitution_span.right.clone());
     let g_subst_bhyp = g_substituted.bhyp();
 
-    assert_eq!(g_subst_bhyp.edges().len(), 3); // original 2 edges, M replaced by T
-    assert_eq!(g_subst_bhyp.nodes().len(), 7); // original
+    save_bhyp_image(test_name, "path2_after_substitution", &g_subst_bhyp);
 
-    // Find t_out in g_substituted (the target of the T-labeled edge)
+    assert_eq!(g_subst_bhyp.edges().len(), 3);
+    assert_eq!(g_subst_bhyp.nodes().len(), 7);
+
     let t_edge_in_gs = g_subst_bhyp.edges().iter().find(|&e| {
         g_subst_bhyp.get_label(*e) == Some(&Label::Symbol("T".to_string()))
     }).unwrap();
+
     let t_out_in_gs = g_subst_bhyp.get_targets(*t_edge_in_gs).unwrap()[0];
 
-assert_eq!(
-    g_subst_bhyp.out_degree(t_out_in_gs),
-    2,
-    "T output was not glued to old M output / mo"
-);
+    assert_eq!(
+        g_subst_bhyp.out_degree(t_out_in_gs),
+        2,
+        "T output was not glued to old M output / mo"
+    );
 
-
-    // Create shared span for copying T in substituted graph
     let mut k_t = BHyp::new();
     let k_t_node = k_t.add_node();
 
@@ -1190,15 +1381,253 @@ assert_eq!(
         to_r: to_r_t,
     };
 
-    // copy_subhypergraph(g_substituted, t, shared_span)
-    let path2_result = copy_subhypergraph(&g_subst_bhyp, &t, shared_span_for_copy_t).unwrap();
-    
-    assert_eq!(path2_result.edges().len(), 4); // original 2 edges + 2 copies of T
-    assert_eq!(path2_result.nodes().len(), 8); // todo: fix, free of T got copied
+    save_span_images(
+        test_name,
+        "path2_shared_span_for_copy_T",
+        &shared_span_for_copy_t,
+    );
 
-    // assert results are isomorphic
+    let path2_result = copy_subhypergraph(
+        &g_subst_bhyp,
+        &t,
+        shared_span_for_copy_t,
+    ).unwrap();
+
+    save_bhyp_image(test_name, "path2_result", &path2_result);
+
+    assert_eq!(path2_result.edges().len(), 4);
+    assert_eq!(path2_result.nodes().len(), 8);
+
     assert!(are_isomorphic(&path1_result.bhyp(), &path2_result));
 }
+// #[test]
+// fn test_copy_subst_commute() {
+//     // create G
+//     let mut g = BHyp::new();
+//     let m1 = g.add_node();
+//     let m2 = g.add_node();
+//     let mo = g.add_node();
+//     let g1 = g.add_node();
+//     let go1 = g.add_node();
+//     let go2 = g.add_node();
+
+//     g.add_edge(
+//         vec![SourceWithBinding { source: m1, bound: vec![] }, 
+//         SourceWithBinding { source: m2, bound: vec![] }],
+//         vec![mo],
+//         Some(Label::Meta("M".to_string(), 2)),
+//     ).unwrap();
+
+//     g.add_edge(
+//         vec![SourceWithBinding { source: mo, bound: vec![] }, 
+//         SourceWithBinding { source: g1, bound: vec![] }],
+//         vec![go2],
+//         Some(Label::Symbol("G2".to_string())),
+//     ).unwrap();
+
+//     g.add_edge(
+//         vec![SourceWithBinding { source: mo, bound: vec![] }],
+//         vec![go1],
+//         Some(Label::Symbol("G1".to_string())),
+//     ).unwrap();
+
+//     // create subhyp M (matching structure in G)
+//     let mut m = BHyp::new();
+//     let m_n1 = m.add_node();
+//     let m_n2 = m.add_node();
+//     let m_out = m.add_node();
+    
+//     m.add_edge(
+//         vec![SourceWithBinding { source: m_n1, bound: vec![] }, 
+//         SourceWithBinding { source: m_n2, bound: vec![] }],
+//         vec![m_out],
+//         Some(Label::Meta("M".to_string(), 2)),
+//     ).unwrap();
+
+//     // create replacement T 
+//     let mut t = BHyp::new();
+//     let t1 = t.add_node();
+//     let t2 = t.add_node();
+//     let t3 = t.add_node();
+//     let t_out = t.add_node();
+    
+//     t.add_edge(
+//         vec![SourceWithBinding {source: t1, bound: vec![]},
+//         SourceWithBinding {source: t2, bound: vec![]},
+//         SourceWithBinding {source: t3, bound: vec![]}], 
+//         vec![t_out], 
+//         Some(Label::Symbol("T".to_string())),
+//     ).unwrap();
+
+//     // Create T with interface
+//     let t_with_interface = BHyp_with_interface::from_bhyp(
+//         t.clone());
+
+//     // Create interface map: M's nodes -> T's nodes; on the interface level
+
+// // Get the interface nodes (not t1, t2, t_out directly!)
+// let t_input_interface_nodes: Vec<NodeId> = t_with_interface.input_interface().nodes().iter().copied().collect();
+// let t_output_interface_nodes: Vec<NodeId> = t_with_interface.output_interface().nodes().iter().copied().collect();
+
+// // Map met nodes to T's INTERFACE nodes
+// let met = construct_meta_hypergraph(Label::Meta("M".to_string(), 2)).unwrap();
+// let met_edge = met.edges().iter().next().unwrap();
+// let met_sources = met.get_sources(*met_edge).unwrap();
+// let met_targets = met.get_targets(*met_edge).unwrap();
+
+// let mut interface_map = HashMap::new();
+// // Need to find which interface nodes correspond to t1, t2, t_out
+// // by looking at input_map and output_map
+// for (&iface_node, &t_node) in t_with_interface.input_map() {
+//     if t_node == t1 {
+//         interface_map.insert(met_sources[0], iface_node);
+//     } else if t_node == t2 {
+//         interface_map.insert(met_sources[1], iface_node);
+//     }
+// }
+// for (&iface_node, &t_node) in t_with_interface.output_map() {
+//     if t_node == t_out {
+//         interface_map.insert(met_targets[0], iface_node);
+//     }
+// }
+
+//     // Create substitution
+//     let subst = Substitution::new(
+//         Label::Meta("M".to_string(), 2), 
+//         t_with_interface.clone()
+//     ).with_interface_map(interface_map);
+
+//     // Create shared span for copy_subhypergraph: G <- K -> M
+//     // Following the pattern from copy_simple_subhyp
+//     let mut k = BHyp::new();
+//     let k_node = k.add_node();
+
+//     // K -> G: maps k_node to mo (the shared output node in G)
+//     let to_l = BHypMorphism::new(
+//         k.clone(),
+//         g.clone(),
+//         [(k_node, mo)].into_iter().collect(),
+//         HashMap::new(),
+//     ).unwrap();
+
+//     // K -> M: maps k_node to m_out (the output node in M)
+//     let to_r = BHypMorphism::new(
+//         k.clone(),
+//         m.clone(),
+//         [(k_node, m_out)].into_iter().collect(),
+//         HashMap::new(),
+//     ).unwrap();
+
+//     let shared_span_for_copy = Span {
+//         left: g.clone(),
+//         middle: k.clone(),
+//         right: m.clone(),
+//         to_l,
+//         to_r,
+//     };
+
+//     // Verify out_degree for copying (should be 2: G1 and G2 edges)
+//     let n = g.out_degree(mo);
+//     assert_eq!(n, 2);
+
+//     // PATH 1: copy then substitute
+//     // copy_subhypergraph(g, m, shared_span) - copies M at shared output node mo
+//     let gm_copied = copy_subhypergraph(&g, &m, shared_span_for_copy).unwrap();
+
+//     assert_eq!(gm_copied.edges().len(), 4); // original 2 edges + 2 copies of M
+//     assert_eq!(gm_copied.nodes().len(), 7);
+
+//     // gm_copied should now have 2 copies of M
+//     // Create empty shared span for substitution
+//     let empty_k = BHyp::new();
+//     let empty_to_gm = BHypMorphism::new(empty_k.clone(), gm_copied.clone(), HashMap::new(), HashMap::new()).unwrap();
+//     let empty_to_t = BHypMorphism::new(empty_k.clone(), t.clone(), HashMap::new(), HashMap::new()).unwrap();
+    
+//     let shared_span_for_subst_copied = Span {
+//         left: gm_copied.clone(),
+//         middle: empty_k.clone(),
+//         right: t.clone(),
+//         to_l: empty_to_gm.clone(),
+//         to_r: empty_to_t.clone(),
+//     };
+
+//     let gm_copied_with_interface = BHyp_with_interface::from_bhyp(gm_copied.clone());
+//     let path1_result = apply_substitution(&gm_copied_with_interface, &subst, &shared_span_for_subst_copied).unwrap();
+
+//     assert_eq!(path1_result.bhyp().edges().len(), 4); // original 2 edges + 2 copies of T
+//     assert_eq!(path1_result.bhyp().nodes().len(), 8); // todo: fix, free of T got copied
+
+//     // PATH 2: substitute then copy
+//     // apply_substitution(g, subst, shared_span) - replaces single M with T
+//     let empty_to_g = BHypMorphism::new(
+//         empty_k.clone(), 
+//         g.clone(), 
+//         HashMap::new(), 
+//         HashMap::new()).unwrap();
+    
+//     let shared_span_for_subst = Span {
+//         left: g.clone(),
+//         middle: empty_k.clone(),
+//         right: t.clone(),
+//         to_l: empty_to_g,
+//         to_r: empty_to_t.clone(),
+//     };
+
+//     let g_with_interface = BHyp_with_interface::from_bhyp(g.clone());
+//     let g_substituted = apply_substitution(&g_with_interface, &subst, &shared_span_for_subst).unwrap();
+//     let g_subst_bhyp = g_substituted.bhyp();
+
+//     assert_eq!(g_subst_bhyp.edges().len(), 3); // original 2 edges, M replaced by T
+//     assert_eq!(g_subst_bhyp.nodes().len(), 7); // original
+
+//     // Find t_out in g_substituted (the target of the T-labeled edge)
+//     let t_edge_in_gs = g_subst_bhyp.edges().iter().find(|&e| {
+//         g_subst_bhyp.get_label(*e) == Some(&Label::Symbol("T".to_string()))
+//     }).unwrap();
+//     let t_out_in_gs = g_subst_bhyp.get_targets(*t_edge_in_gs).unwrap()[0];
+
+// assert_eq!(
+//     g_subst_bhyp.out_degree(t_out_in_gs),
+//     2,
+//     "T output was not glued to old M output / mo"
+// );
+
+
+//     // Create shared span for copying T in substituted graph
+//     let mut k_t = BHyp::new();
+//     let k_t_node = k_t.add_node();
+
+//     let to_l_t = BHypMorphism::new(
+//         k_t.clone(),
+//         g_subst_bhyp.clone(),
+//         [(k_t_node, t_out_in_gs)].into_iter().collect(),
+//         HashMap::new(),
+//     ).unwrap();
+
+//     let to_r_t = BHypMorphism::new(
+//         k_t.clone(),
+//         t.clone(),
+//         [(k_t_node, t_out)].into_iter().collect(),
+//         HashMap::new(),
+//     ).unwrap();
+
+//     let shared_span_for_copy_t = Span {
+//         left: g_subst_bhyp.clone(),
+//         middle: k_t,
+//         right: t.clone(),
+//         to_l: to_l_t,
+//         to_r: to_r_t,
+//     };
+
+//     // copy_subhypergraph(g_substituted, t, shared_span)
+//     let path2_result = copy_subhypergraph(&g_subst_bhyp, &t, shared_span_for_copy_t).unwrap();
+    
+//     assert_eq!(path2_result.edges().len(), 4); // original 2 edges + 2 copies of T
+//     assert_eq!(path2_result.nodes().len(), 8); // todo: fix, free of T got copied
+
+//     // assert results are isomorphic
+//     assert!(are_isomorphic(&path1_result.bhyp(), &path2_result));
+// }
 
 }
 

@@ -1,0 +1,32 @@
+digraph shared_span_for_copy_M_left {
+  fontname="Helvetica"
+  fontsize=12
+  rankdir=LR;
+  node [fontname="Helvetica", fontsize=12];
+  edge [fontname="Helvetica", fontsize=12];
+
+  // Nodes
+  n2 [label="2", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+  n5 [label="5", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+  n1 [label="1", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+  n0 [label="0", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+  n3 [label="3", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+  n4 [label="4", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+
+  // Hyperedges
+  e2 [label="G1", shape=box, style=rounded, color="black"];
+  e1 [label="G2", shape=box, style=rounded, color="black"];
+  e0 [label="M:2", shape=ellipse, style=rounded, color="orange"];
+
+  // Source connections
+  n2 -> e2 [label=""];
+  n2 -> e1 [label="0"];
+  n3 -> e1 [label="1"];
+  n0 -> e0 [label="0"];
+  n1 -> e0 [label="1"];
+
+  // Target connections
+  e2 -> n4 [label=""];
+  e1 -> n5 [label=""];
+  e0 -> n2 [label=""];
+}

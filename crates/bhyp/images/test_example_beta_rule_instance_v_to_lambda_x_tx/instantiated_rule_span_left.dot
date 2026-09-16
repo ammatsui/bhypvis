@@ -1,0 +1,40 @@
+digraph instantiated_rule_span_left {
+  fontname="Helvetica"
+  fontsize=12
+  rankdir=LR;
+  node [fontname="Helvetica", fontsize=12];
+  edge [fontname="Helvetica", fontsize=12];
+
+  // Nodes
+  n1 [label="1", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+  n6 [label="6", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+  n0 [label="0", shape=circle, style=filled, fillcolor=white, color="blue", width=0.2, height=0.2, fixedsize=true];
+  n4 [label="4", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+  n2 [label="2", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+  n3 [label="3", shape=circle, style=filled, fillcolor=white, color="blue", width=0.2, height=0.2, fixedsize=true];
+  n5 [label="5", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+
+  // Hyperedges
+  e3 [label="λ", shape=box, style=rounded, color="black"];
+  e4 [label="app", shape=box, style=rounded, color="black"];
+  e1 [label="λ", shape=box, style=rounded, color="black"];
+  e2 [label="M:1", shape=ellipse, style=rounded, color="orange"];
+  e0 [label="t", shape=box, style=rounded, color="black"];
+
+  // Source connections
+  n4 -> e3 [label=""];
+  n3 -> e3 [style=dashed, color="blue", constraint=false, label="b0,0"];
+  n5 -> e4 [label="0"];
+  n2 -> e4 [label="1"];
+  n1 -> e1 [label=""];
+  n0 -> e1 [style=dashed, color="blue", constraint=false, label="b0,0"];
+  n3 -> e2 [label=""];
+  n0 -> e0 [label=""];
+
+  // Target connections
+  e3 -> n5 [label=""];
+  e4 -> n6 [label=""];
+  e1 -> n2 [label=""];
+  e2 -> n4 [label=""];
+  e0 -> n1 [label=""];
+}

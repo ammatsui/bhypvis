@@ -1,0 +1,54 @@
+digraph BHypWithInterface {
+  fontname="Helvetica"
+  fontsize=12
+  compound=true;
+  rankdir=LR;
+  node [fontname="Helvetica", fontsize=12];
+  edge [fontname="Helvetica", fontsize=12];
+
+  subgraph cluster_input {
+    label="I_G";
+    style=dashed;
+    color="green";
+    i1 [label="i1", shape=circle, style=filled, fillcolor="green", width=0.3, height=0.3, fixedsize=true];
+    i2 [label="i2", shape=circle, style=filled, fillcolor="green", width=0.3, height=0.3, fixedsize=true];
+    i0 [label="i0", shape=circle, style=filled, fillcolor="green", width=0.3, height=0.3, fixedsize=true];
+  }
+
+  subgraph cluster_main {
+    label="G";
+    style=solid;
+    n2 [label="2", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+    n5 [label="5", shape=circle, style=filled, fillcolor=white, color="red", width=0.2, height=0.2, fixedsize=true];
+    n1 [label="1", shape=circle, style=filled, fillcolor=white, color="green", width=0.2, height=0.2, fixedsize=true];
+    n0 [label="0", shape=circle, style=filled, fillcolor=white, color="green", width=0.2, height=0.2, fixedsize=true];
+    n3 [label="3", shape=circle, style=filled, fillcolor=white, color="green", width=0.2, height=0.2, fixedsize=true];
+    n4 [label="4", shape=circle, style=filled, fillcolor=white, color="red", width=0.2, height=0.2, fixedsize=true];
+    e2 [label="G1", shape=box, style=rounded, color="black"];
+    e1 [label="G2", shape=box, style=rounded, color="black"];
+    e0 [label="M:2", shape=ellipse, style=rounded, color="orange"];
+    n2 -> e2 [label=""];
+    e2 -> n4 [label=""];
+    n2 -> e1 [label="0"];
+    n3 -> e1 [label="1"];
+    e1 -> n5 [label=""];
+    n0 -> e0 [label="0"];
+    n1 -> e0 [label="1"];
+    e0 -> n2 [label=""];
+  }
+
+  subgraph cluster_output {
+    label="O_G";
+    style=dashed;
+    color="red";
+    o1 [label="o1", shape=circle, style=filled, fillcolor="red", width=0.3, height=0.3, fixedsize=true];
+    o0 [label="o0", shape=circle, style=filled, fillcolor="red", width=0.3, height=0.3, fixedsize=true];
+  }
+
+  // Interface morphisms
+  i2 -> n3 [style=dotted, color="green", label="", lhead=cluster_main];
+  i0 -> n1 [style=dotted, color="green", label="", lhead=cluster_main];
+  i1 -> n0 [style=dotted, color="green", label="", lhead=cluster_main];
+  n5 -> o0 [style=dotted, color="red", label="", ltail=cluster_main];
+  n4 -> o1 [style=dotted, color="red", label="", ltail=cluster_main];
+}

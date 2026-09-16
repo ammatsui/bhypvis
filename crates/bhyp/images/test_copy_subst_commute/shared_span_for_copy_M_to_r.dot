@@ -1,0 +1,41 @@
+digraph Morphism {
+  fontname="Helvetica"
+  fontsize=12
+  rankdir=LR;
+  compound=true;
+  newrank=true;
+
+  subgraph cluster_domain {
+    label="middle";
+    style=filled;
+    fillcolor="lightblue";
+    fontname="Helvetica";
+    fontsize=12;
+
+    dom_n0 [label="0", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+    dom_anchor [shape=point, width=0, height=0, style=invis];
+  }
+
+  subgraph cluster_codomain {
+    label="right";
+    style=filled;
+    fillcolor="lightcoral";
+    fontname="Helvetica";
+    fontsize=12;
+
+    cod_n0 [label="0", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+    cod_n1 [label="1", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+    cod_n2 [label="2", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+    cod_e0 [label="M:2", shape=ellipse, style=rounded, color="orange"];
+    cod_n0 -> cod_e0 [label="0"];
+    cod_n1 -> cod_e0 [label="1"];
+    cod_e0 -> cod_n2 [label=""];
+    cod_anchor [shape=point, width=0, height=0, style=invis];
+  }
+
+  // Morphism mappings
+  dom_n0 -> cod_n2 [style=dotted, color=forestgreen, constraint=false];
+
+  // Cluster-level morphism arrow
+  dom_anchor -> cod_anchor [lhead=cluster_codomain, ltail=cluster_domain, style=bold, color=black, label="to_r", penwidth=2];
+}
