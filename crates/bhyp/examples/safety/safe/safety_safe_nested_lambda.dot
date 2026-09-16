@@ -1,0 +1,32 @@
+digraph G {
+  fontname="Helvetica"
+  fontsize=12
+  rankdir=LR;
+  node [fontname="Helvetica", fontsize=12];
+  edge [fontname="Helvetica", fontsize=12];
+
+  // Nodes
+  n1 [label="", shape=circle, style=filled, fillcolor=white, color="blue", width=0.2, height=0.2, fixedsize=true];
+  n2 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+  n4 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+  n0 [label="", shape=circle, style=filled, fillcolor=white, color="blue", width=0.2, height=0.2, fixedsize=true];
+  n3 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+
+  // Hyperedges
+  e2 [label="λ", shape=box, style=rounded, color="black"];
+  e0 [label="f", shape=box, style=rounded, color="black"];
+  e1 [label="λ", shape=box, style=rounded, color="black"];
+
+  // Source connections
+  n3 -> e2 [label=""];
+  n0 -> e2 [style=dashed, color="blue", constraint=false, label="b0,0"];
+  n0 -> e0 [label="0"];
+  n1 -> e0 [label="1"];
+  n2 -> e1 [label=""];
+  n1 -> e1 [style=dashed, color="blue", constraint=false, label="b0,0"];
+
+  // Target connections
+  e2 -> n4 [label=""];
+  e0 -> n2 [label=""];
+  e1 -> n3 [label=""];
+}

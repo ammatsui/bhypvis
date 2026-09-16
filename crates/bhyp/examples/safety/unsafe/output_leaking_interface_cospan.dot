@@ -1,0 +1,10 @@
+digraph Cospan {
+  fontname="Helvetica"
+  rankdir=LR;
+
+  I_G [label="I_G\n(0 nodes)", shape=box, style=filled, fillcolor=lightgreen];
+  G [label="G\n(4 nodes, 3 edges)", shape=box, style=filled, fillcolor=lightblue];
+  O_G [label="O_G\n(2 nodes)", shape=box, style=filled, fillcolor=lightcoral];
+  I_G -> G [label=""];
+  O_G -> G [label="", dir=back];
+}

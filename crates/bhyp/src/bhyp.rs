@@ -645,7 +645,7 @@ impl BHyp_with_interface {
     }
 
     /// Get a mutable reference to the underlying BHyp
-    /// WARNING: After using this, you should call recompute_interface()
+    /// WARNING: After using this, should call recompute_interface()
     pub fn bhyp_mut(&mut self) -> &mut BHyp {
         &mut self.bhyp
     }

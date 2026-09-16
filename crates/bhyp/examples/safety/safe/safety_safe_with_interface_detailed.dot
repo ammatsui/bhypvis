@@ -1,0 +1,39 @@
+digraph BHypWithInterface {
+  fontname="Helvetica"
+  fontsize=12
+  compound=true;
+  rankdir=LR;
+  node [fontname="Helvetica", fontsize=12];
+  edge [fontname="Helvetica", fontsize=12];
+
+  subgraph cluster_input {
+    label="I_G";
+    style=dashed;
+    color="green";
+  }
+
+  subgraph cluster_main {
+    label="G";
+    style=solid;
+    n0 [label="", shape=circle, style=filled, fillcolor=white, color="blue", width=0.2, height=0.2, fixedsize=true];
+    n1 [label="", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+    n2 [label="", shape=circle, style=filled, fillcolor=white, color="red", width=0.2, height=0.2, fixedsize=true];
+    e0 [label="f", shape=box, style=rounded, color="black"];
+    e1 [label="λ", shape=box, style=rounded, color="black"];
+    n0 -> e0 [label=""];
+    e0 -> n1 [label=""];
+    n1 -> e1 [label=""];
+    n0 -> e1 [style=dashed, color="blue", constraint=false, label="b0,0"];
+    e1 -> n2 [label=""];
+  }
+
+  subgraph cluster_output {
+    label="O_G";
+    style=dashed;
+    color="red";
+    o0 [label="", shape=circle, style=filled, fillcolor="red", width=0.3, height=0.3, fixedsize=true];
+  }
+
+  // Interface morphisms
+  n2 -> o0 [style=dotted, color="red", label="", ltail=cluster_main];
+}

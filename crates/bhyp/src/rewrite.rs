@@ -866,7 +866,7 @@ pub fn apply_substitution_to_span(
         /// ```
         ///
         /// first form the context `[m : L' -> G]`. Then require it to be equal
-        /// to one of `allowed_contexts`. Equality is delegated to your `Context`
+        /// to one of `allowed_contexts`. Equality is delegated to `Context`
         /// implementation, i.e. complement-isomorphism.
         pub fn apply_dpoi(
             &self,
