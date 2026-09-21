@@ -1232,6 +1232,101 @@ use super::*;
 
     #[test]
     fn test_context_composition() {
+        // C1 = \lambda x. [] 
+        // G
+        let mut g = BHyp::new();
+        let g_o = g.add_node();
+        let g_x = g.add_node();
+        let g_h = g.add_node();
+
+        g.add_edge(
+        vec![SourceWithBinding {
+            source: g_h,
+            bound: vec![g_x],
+        }],
+        vec![g_o],
+        Some(Label::Symbol("λ".to_string())),
+        ).unwrap();
+
+        g.add_edge(
+            vec![SourceWithBinding {
+                source: g_x,
+                bound: vec![],
+            }], vec![g_h], 
+            Some(Label::Symbol("e".to_string()))
+        ).unwrap();
+
+        // create hole H just 
+        let mut h = BHyp::new();
+        let h_o = h.add_node();
+        let h_i = h.add_node();
+        h.add_edge(
+            vec![SourceWithBinding {
+                source: h_i,
+                bound: vec![],
+            }],
+            vec![h_o],
+            Some(Label::Symbol("e".to_string())),
+        ).unwrap();
+
+        let ctxt1 = Context::from_hole_and_shape(&h, &g).unwrap();
+        // C2 = M[[], x]
+        // G
+        let mut g2 = BHyp::new();
+        let g2_o = g2.add_node();
+        let g2_x = g2.add_node();
+        let g2_y = g2.add_node();
+        let g2_i = g2.add_node();
+
+        g2.add_edge(
+        vec![SourceWithBinding {
+            source: g2_x,
+            bound: vec![],
+        },
+                    SourceWithBinding{
+                        source: g2_y,
+                        bound: vec![]
+                    }],
+        vec![g2_o],
+        Some(Label::Meta("M".to_string(),   2)),
+        ).unwrap();
+
+        g2.add_edge(
+            vec![SourceWithBinding{
+            source: g2_i,
+            bound: vec![],
+        }], 
+         vec![g2_x], 
+        Some(Label::Symbol("f".to_string())),
+    ).unwrap();
+
+
+        // create hole H just 
+        let mut h2 = BHyp::new();
+        let h2_o = h2.add_node();
+        let h2_i = h2.add_node();
+        h2.add_edge(
+            vec![SourceWithBinding {
+                source: h2_i,
+                bound: vec![],
+            }],
+            vec![h2_o],
+            Some(Label::Symbol("f".to_string())),
+        ).unwrap();
+
+        let ctxt2 = Context::from_hole_and_shape(&h2, &g2).unwrap();
+
+        
+        // compose 
+        let res = ctxt1.compose(&ctxt2).unwrap();
+
+        let compl = res.complement().unwrap();
+
+        assert_eq!(compl.edges().len(), 2);
+        assert_eq!(compl.nodes().len(), 4);
+
+
+        // C1[C2] = \lambda x.M[[], x]
 
     }
 
@@ -1506,7 +1601,7 @@ mod rewrite_tests {
             to_r,
         };
         save_span_images(test_name, "rule_span_before_instantiation", &rule_span);
-        
+
         let rule = RewriteRule::new(rule_span).unwrap();
 
         assert!(rule.metavariables().contains(&m));

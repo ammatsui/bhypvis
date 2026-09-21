@@ -6,8 +6,8 @@ digraph substitution_T_lambda_x_tx {
   edge [fontname="Helvetica", fontsize=12];
 
   // Nodes
-  n2 [label="2", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
   n0 [label="0", shape=circle, style=filled, fillcolor=white, color="blue", width=0.2, height=0.2, fixedsize=true];
+  n2 [label="2", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
   n1 [label="1", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
 
   // Hyperedges

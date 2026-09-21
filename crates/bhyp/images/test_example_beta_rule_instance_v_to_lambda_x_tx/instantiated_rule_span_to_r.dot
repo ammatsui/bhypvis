@@ -23,20 +23,20 @@ digraph Morphism {
     fontname="Helvetica";
     fontsize=12;
 
-    cod_n1 [label="1", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
-    cod_n0 [label="0", shape=circle, style=filled, fillcolor=white, color="blue", width=0.2, height=0.2, fixedsize=true];
-    cod_n2 [label="2", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
     cod_n3 [label="3", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
-    cod_e0 [label="t", shape=box, style=rounded, color="black"];
+    cod_n0 [label="0", shape=circle, style=filled, fillcolor=white, color="blue", width=0.2, height=0.2, fixedsize=true];
+    cod_n1 [label="1", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+    cod_n2 [label="2", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
     cod_e1 [label="λ", shape=box, style=rounded, color="black"];
     cod_e2 [label="M:1", shape=ellipse, style=rounded, color="orange"];
-    cod_n0 -> cod_e0 [label=""];
-    cod_e0 -> cod_n1 [label=""];
+    cod_e0 [label="t", shape=box, style=rounded, color="black"];
     cod_n1 -> cod_e1 [label=""];
     cod_n0 -> cod_e1 [style=dashed, color="blue", constraint=false, label="b0,0"];
     cod_e1 -> cod_n2 [label=""];
     cod_n2 -> cod_e2 [label=""];
     cod_e2 -> cod_n3 [label=""];
+    cod_n0 -> cod_e0 [label=""];
+    cod_e0 -> cod_n1 [label=""];
     cod_anchor [shape=point, width=0, height=0, style=invis];
   }
 
