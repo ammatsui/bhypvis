@@ -5,9 +5,10 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::rc::Rc;
 
 // Assuming these are imported from the bhyp module
-use crate::bhyp::{BHyp, BHyp_with_interface, EdgeId, Label, NodeId, SourceWithBinding};
+use crate::bhyp::{BHyp, BHyp_with_interface, EdgeId, NodeId, SourceWithBinding};
 
 /// Error types for morphism construction
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -102,10 +103,8 @@ impl From<MorphismError> for CategoricalError {
 /// A morphism between two BHyp instances
 #[derive(Debug, Clone)]
 pub struct BHypMorphism {
-    /// The domain hypergraph (owned)
-    domain: BHyp,
-    /// The codomain hypergraph (owned)
-    codomain: BHyp,
+    domain: Rc<BHyp>,
+    codomain: Rc<BHyp>,
     /// Mapping from domain nodes to codomain nodes
     on_nodes: HashMap<NodeId, NodeId>,
     /// Mapping from domain edges to codomain edges
@@ -115,14 +114,14 @@ pub struct BHypMorphism {
 impl BHypMorphism {
     /// Create a new morphism with validation
     pub fn new(
-        domain: BHyp,
-        codomain: BHyp,
+        domain: impl Into<Rc<BHyp>>,
+        codomain: impl Into<Rc<BHyp>>,
         on_nodes: HashMap<NodeId, NodeId>,
         on_edges: HashMap<EdgeId, EdgeId>,
     ) -> Result<Self, MorphismError> {
         let morphism = BHypMorphism {
-            domain,
-            codomain,
+            domain: domain.into(),
+            codomain: codomain.into(),
             on_nodes,
             on_edges,
         };
@@ -132,14 +131,14 @@ impl BHypMorphism {
 
     /// Create a morphism without validation (unsafe)
     pub fn new_unchecked(
-        domain: BHyp,
-        codomain: BHyp,
+        domain: impl Into<Rc<BHyp>>,
+        codomain: impl Into<Rc<BHyp>>,
         on_nodes: HashMap<NodeId, NodeId>,
         on_edges: HashMap<EdgeId, EdgeId>,
     ) -> Self {
         BHypMorphism {
-            domain,
-            codomain,
+            domain: domain.into(),
+            codomain: codomain.into(),
             on_nodes,
             on_edges,
         }
@@ -288,11 +287,7 @@ impl BHypMorphism {
 
     /// Check if this is the identity morphism
     pub fn is_identity(&self) -> bool {
-        // Check same structure
-        if self.domain.nodes().len() != self.codomain.nodes().len() {
-            return false;
-        }
-        if self.domain.edges().len() != self.codomain.edges().len() {
+        if !self.domain.structurally_eq(&self.codomain) {
             return false;
         }
         self.on_nodes.iter().all(|(k, v)| k == v) && self.on_edges.iter().all(|(k, v)| k == v)
@@ -300,10 +295,7 @@ impl BHypMorphism {
 
     /// Compose two morphisms: self ∘ other (first apply other, then self)
     pub fn compose(&self, other: &BHypMorphism) -> Result<BHypMorphism, MorphismError> {
-        // Check that other's codomain matches self's domain
-        if other.codomain.nodes() != self.domain.nodes()
-            || other.codomain.edges() != self.domain.edges()
-        {
+        if !same_bhyp(&other.codomain, &self.domain) {
             return Err(MorphismError::DomainMismatch);
         }
 
@@ -320,8 +312,8 @@ impl BHypMorphism {
             .collect();
 
         BHypMorphism::new(
-            other.domain.clone(),
-            self.codomain.clone(),
+            Rc::clone(&other.domain),
+            Rc::clone(&self.codomain),
             composed_nodes,
             composed_edges,
         )
@@ -332,49 +324,23 @@ impl BHypMorphism {
 
 impl PartialEq for BHypMorphism {
     fn eq(&self, other: &Self) -> bool {
-        // Check that domains are equal (same nodes and edges)
-        if self.domain.nodes() != other.domain.nodes() {
-            return false;
-        }
-        if self.domain.edges() != other.domain.edges() {
-            return false;
-        }
-
-        // Check that codomains are equal (same nodes and edges)
-        if self.codomain.nodes() != other.codomain.nodes() {
-            return false;
-        }
-        if self.codomain.edges() != other.codomain.edges() {
-            return false;
-        }
-
-        // Check that every node in the domain maps to the same node in both morphisms
-        for &node in self.domain.nodes() {
-            match (self.on_nodes.get(&node), other.on_nodes.get(&node)) {
-                (Some(&n1), Some(&n2)) if n1 != n2 => return false,
-                (Some(_), None) | (None, Some(_)) => return false,
-                _ => {}
-            }
-        }
-
-        // Check that every edge in the domain maps to the same edge in both morphisms
-        for &edge in self.domain.edges() {
-            match (self.on_edges.get(&edge), other.on_edges.get(&edge)) {
-                (Some(&e1), Some(&e2)) if e1 != e2 => return false,
-                (Some(_), None) | (None, Some(_)) => return false,
-                _ => {}
-            }
-        }
-
-        true
+        same_bhyp(&self.domain, &other.domain)
+            && same_bhyp(&self.codomain, &other.codomain)
+            && self.on_nodes == other.on_nodes
+            && self.on_edges == other.on_edges
     }
+}
+
+fn same_bhyp(a: &Rc<BHyp>, b: &Rc<BHyp>) -> bool {
+    Rc::ptr_eq(a, b) || a.structurally_eq(b)
 }
 
 /// Create the identity morphism on a BHyp
 pub fn identity_morphism(bhyp: &BHyp) -> BHypMorphism {
     let on_nodes: HashMap<_, _> = bhyp.nodes().iter().map(|&n| (n, n)).collect();
     let on_edges: HashMap<_, _> = bhyp.edges().iter().map(|&e| (e, e)).collect();
-    BHypMorphism::new_unchecked(bhyp.clone(), bhyp.clone(), on_nodes, on_edges)
+    let bhyp = Rc::new(bhyp.clone());
+    BHypMorphism::new_unchecked(Rc::clone(&bhyp), bhyp, on_nodes, on_edges)
 }
 
 pub fn combined_interface_to_bhyp_morphism(
@@ -402,31 +368,71 @@ pub fn combined_interface_to_bhyp_morphism(
 /// Span and CoSpan structs
 #[derive(Debug, Clone)]
 pub struct Span {
-    /// left-hand side
-    pub left: BHyp,
-    /// middle
-    pub middle: BHyp,
-    /// right-hand side 
-    pub right: BHyp,
-    /// morphisms
     pub to_l: BHypMorphism,
-    pub to_r: BHypMorphism
+    pub to_r: BHypMorphism,
+}
+
+impl Span {
+    pub fn new(
+        to_l: BHypMorphism,
+        mut to_r: BHypMorphism,
+    ) -> Result<Self, CategoricalError> {
+        if !same_bhyp(&to_l.domain, &to_r.domain) {
+            return Err(CategoricalError::DomainMismatch);
+        }
+        to_r.domain = Rc::clone(&to_l.domain);
+        Ok(Self { to_l, to_r })
+    }
+
+    /// The codomain of the left leg.
+    pub fn left(&self) -> &BHyp {
+        self.to_l.codomain()
+    }
+
+    /// The shared domain of both legs.
+    pub fn middle(&self) -> &BHyp {
+        self.to_l.domain()
+    }
+
+    /// The codomain of the right leg.
+    pub fn right(&self) -> &BHyp {
+        self.to_r.codomain()
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct CoSpan {
-    /// left-hand side
-    pub left: BHyp,
-    /// middle
-    pub middle: BHyp,
-    /// right-hand side 
-    pub right: BHyp,
-    /// morphisms
     pub from_l: BHypMorphism,
-    pub from_r: BHypMorphism
+    pub from_r: BHypMorphism,
 }
 
+impl CoSpan {
+    pub fn new(
+        from_l: BHypMorphism,
+        mut from_r: BHypMorphism,
+    ) -> Result<Self, CategoricalError> {
+        if !same_bhyp(&from_l.codomain, &from_r.codomain) {
+            return Err(CategoricalError::CodomainMismatch);
+        }
+        from_r.codomain = Rc::clone(&from_l.codomain);
+        Ok(Self { from_l, from_r })
+    }
 
+    /// The domain of the left leg.
+    pub fn left(&self) -> &BHyp {
+        self.from_l.domain()
+    }
+
+    /// The shared codomain of both legs.
+    pub fn middle(&self) -> &BHyp {
+        self.from_l.codomain()
+    }
+
+    /// The domain of the right leg.
+    pub fn right(&self) -> &BHyp {
+        self.from_r.domain()
+    }
+}
 
 // ============================================================================
 // Pushout and Pushout Complement
@@ -436,44 +442,21 @@ pub struct CoSpan {
 // Result Types
 // ============================================================================
 
-/// Result of a pushout computation
-#[derive(Debug, Clone)]
-pub struct PushoutResult {
-    /// The pushout object D
-    pub pushout: BHyp,
-    /// Universal morphism from B to D
-    pub morphism_from_b: BHypMorphism,
-    /// Universal morphism from C to D  
-    pub morphism_from_c: BHypMorphism,
-}
-
-/// Result of a pullback computation
-#[derive(Debug, Clone)]
-pub struct PullbackResult {
-    /// The pullback object P
-    pub pullback: BHyp,
-    /// Universal morphism from P to B
-    pub morphism_to_b: BHypMorphism,
-    /// Universal morphism from P to C
-    pub morphism_to_c: BHypMorphism,
-}
+/// A pushout result, represented by its two injections into the apex.
+pub type PushoutResult = CoSpan;
+/// A pullback result, represented by its two projections from the base.
+pub type PullbackResult = Span;
 
 /// Result of a pushout complement computation
 #[derive(Debug, Clone)]
 pub struct PushoutComplementResult {
-    /// The pushout complement object C
-    pub complement: BHyp,
-    /// Morphism from K to C
     pub morphism_from_k: BHypMorphism,
-    /// Morphism from C to G
     pub morphism_to_g: BHypMorphism,
 }
 
 ///////////////////
 /// morphisms and inclusions
 /// ///////////////
-//// i think that could be moved to categorical.rs
-
 /// Finds all monomorphic inclusions (occurrences) of pattern H in target G.
 pub fn find_all_occurrences(pattern: &BHyp, target: &BHyp) -> Vec<BHypMorphism> {
     let mut results = Vec::new();
@@ -482,11 +465,13 @@ pub fn find_all_occurrences(pattern: &BHyp, target: &BHyp) -> Vec<BHypMorphism> 
     let mut node_map = HashMap::new();
     let mut edge_map = HashMap::new();
     
+    let pattern = Rc::new(pattern.clone());
+    let target = Rc::new(target.clone());
     backtrack_match(
         0,
         &pattern_edges,
-        pattern,
-        target,
+        &pattern,
+        &target,
         &mut node_map,
         &mut edge_map,
         &mut results,
@@ -498,25 +483,70 @@ pub fn find_all_occurrences(pattern: &BHyp, target: &BHyp) -> Vec<BHypMorphism> 
 fn backtrack_match(
     edge_idx: usize,
     pattern_edges: &[EdgeId],
-    pattern: &BHyp,
-    target: &BHyp,
+    pattern: &Rc<BHyp>,
+    target: &Rc<BHyp>,
     current_node_map: &mut HashMap<NodeId, NodeId>,
     current_edge_map: &mut HashMap<EdgeId, EdgeId>,
     results: &mut Vec<BHypMorphism>,
 ) {
     // Base Case: All edges matched
     if edge_idx == pattern_edges.len() {
-        // (Assuming no isolated nodes in H. If H has isolated nodes, 
-        // need a secondary loop here to map remaining unmapped nodes in pattern.nodes())
-        if let Ok(m) = BHypMorphism::new(
-            pattern.clone(), 
-            target.clone(), 
-            current_node_map.clone(), 
-            current_edge_map.clone()
-        ) {
-            results.push(m);
-        }
+        let unmapped: Vec<NodeId> = pattern
+            .nodes()
+            .iter()
+            .filter(|node| !current_node_map.contains_key(node))
+            .copied()
+            .collect();
+        backtrack_isolated_nodes(
+            &unmapped,
+            0,
+            pattern,
+            target,
+            current_node_map,
+            current_edge_map,
+            results,
+        );
         return;
+    }
+
+    fn backtrack_isolated_nodes(
+        unmapped: &[NodeId],
+        idx: usize,
+        pattern: &Rc<BHyp>,
+        target: &Rc<BHyp>,
+        current_node_map: &mut HashMap<NodeId, NodeId>,
+        current_edge_map: &HashMap<EdgeId, EdgeId>,
+        results: &mut Vec<BHypMorphism>,
+    ) {
+        if idx == unmapped.len() {
+            if let Ok(morphism) = BHypMorphism::new(
+                Rc::clone(pattern),
+                Rc::clone(target),
+                current_node_map.clone(),
+                current_edge_map.clone(),
+            ) {
+                results.push(morphism);
+            }
+            return;
+        }
+
+        let pattern_node = unmapped[idx];
+        for &target_node in target.nodes() {
+            if current_node_map.values().any(|&mapped| mapped == target_node) {
+                continue;
+            }
+            current_node_map.insert(pattern_node, target_node);
+            backtrack_isolated_nodes(
+                unmapped,
+                idx + 1,
+                pattern,
+                target,
+                current_node_map,
+                current_edge_map,
+                results,
+            );
+            current_node_map.remove(&pattern_node);
+        }
     }
 
     let p_edge = pattern_edges[edge_idx];
@@ -592,139 +622,7 @@ fn backtrack_match(
 
 /// Check if T is a subhypergraph of G, and if so return the inclusion morphism
 pub fn find_subhypergraph_inclusion(t: &BHyp, g: &BHyp) -> Option<BHypMorphism> {
-    // T can only be a subhypergraph if it has at most as many nodes and edges as G
-    if t.nodes().len() > g.nodes().len() || t.edges().len() > g.edges().len() {
-        return None;
-    }
-
-    let t_nodes: Vec<NodeId> = t.nodes().iter().copied().collect();
-    let g_nodes: Vec<NodeId> = g.nodes().iter().copied().collect();
-
-    // Empty T is always a subhypergraph of G
-    if t_nodes.is_empty() && t.edges().is_empty() {
-        return Some(BHypMorphism::new(
-            t.clone(), g.clone(), HashMap::new(), HashMap::new()
-        ).unwrap());
-    }
-
-    // For small graphs, try all possible injective mappings from T to G
-    fn try_inclusion(
-        t: &BHyp,
-        g: &BHyp,
-        t_nodes: &[NodeId],
-        g_nodes: &[NodeId],
-        node_map: &mut HashMap<NodeId, NodeId>,
-        idx: usize,
-        used: &mut HashSet<NodeId>,
-    ) -> Option<HashMap<EdgeId, EdgeId>> {
-        if idx == t_nodes.len() {
-            // Check if this node mapping induces a valid edge inclusion
-            let mut edge_map: HashMap<EdgeId, EdgeId> = HashMap::new();
-
-            for &e_t in t.edges() {
-                let mut found = false;
-                for &e_g in g.edges() {
-                    if edge_map.values().any(|&e| e == e_g) {
-                        continue;
-                    }
-
-                    // Check compatibility
-                    let swbs_t = t.get_sources_with_binding(e_t).unwrap();
-                    let swbs_g = g.get_sources_with_binding(e_g).unwrap();
-                    let targets_t = t.get_targets(e_t).unwrap();
-                    let targets_g = g.get_targets(e_g).unwrap();
-
-                    if swbs_t.len() != swbs_g.len() || targets_t.len() != targets_g.len() {
-                        continue;
-                    }
-
-                    let mut compatible = true;
-
-                    // Check sources and bindings
-                    for (s_t, s_g) in swbs_t.iter().zip(swbs_g.iter()) {
-                        if node_map[&s_t.source] != s_g.source {
-                            compatible = false;
-                            break;
-                        }
-                        if s_t.bound.len() != s_g.bound.len() {
-                            compatible = false;
-                            break;
-                        }
-                        for (b_t, b_g) in s_t.bound.iter().zip(s_g.bound.iter()) {
-                            if node_map[b_t] != *b_g {
-                                compatible = false;
-                                break;
-                            }
-                        }
-                        if !compatible {
-                            break;
-                        }
-                    }
-
-                    if !compatible {
-                        continue;
-                    }
-
-                    // Check targets
-                    for (t_t, t_g) in targets_t.iter().zip(targets_g.iter()) {
-                        if node_map[t_t] != *t_g {
-                            compatible = false;
-                            break;
-                        }
-                    }
-
-                    if !compatible {
-                        continue;
-                    }
-
-                    // Check labels
-                    if t.get_label(e_t) != g.get_label(e_g) {
-                        continue;
-                    }
-
-                    edge_map.insert(e_t, e_g);
-                    found = true;
-                    break;
-                }
-
-                if !found {
-                    return None;
-                }
-            }
-
-            return Some(edge_map);
-        }
-
-        let n_t = t_nodes[idx];
-        for &n_g in g_nodes {
-            if used.contains(&n_g) {
-                continue;
-            }
-
-            node_map.insert(n_t, n_g);
-            used.insert(n_g);
-
-            if let Some(edge_map) = try_inclusion(t, g, t_nodes, g_nodes, node_map, idx + 1, used) {
-                return Some(edge_map);
-            }
-
-            node_map.remove(&n_t);
-            used.remove(&n_g);
-        }
-
-        None
-    }
-
-    let mut node_map = HashMap::new();
-    let mut used = HashSet::new();
-
-    if let Some(edge_map) = try_inclusion(t, g, &t_nodes, &g_nodes, &mut node_map, 0, &mut used) {
-        Some(BHypMorphism::new(
-            t.clone(), g.clone(), node_map, edge_map
-        ).unwrap())
-    } else {
-        None
-    }
+    find_all_occurrences(t, g).into_iter().next()
 }
 
 /// Check if T is a subhypergraph of G (without returning the morphism)
@@ -738,20 +636,7 @@ pub fn is_subhypergraph(t: &BHyp, g: &BHyp) -> bool {
 
 // hypergraph inclusion 
 pub fn build_inclusion(t: &BHyp, g: &BHyp) -> Result<BHypMorphism, MorphismError> {
-    if is_subhypergraph(&t, &g) {
-        
-        let option = find_subhypergraph_inclusion(&t, &g);
-
-// Converts Some(bhyp) -> Ok(bhyp)
-// Converts None -> Err(CopyError::InvalidSubhypergraph(...))
-    let result = option.ok_or(
-    MorphismError::DomainMismatch
-);   
-return result
-    }
- 
-    return Err(MorphismError::DomainMismatch);
-
+    find_subhypergraph_inclusion(t, g).ok_or(MorphismError::DomainMismatch)
 }
 
 
@@ -803,7 +688,7 @@ pub fn compute_pushout(
     g: &BHypMorphism, // g: A -> C
 ) -> Result<PushoutResult, CategoricalError> {
     // Verify f and g have the same domain
-    if f.domain.nodes() != g.domain.nodes() || f.domain.edges() != g.domain.edges() {
+    if !same_bhyp(&f.domain, &g.domain) {
         return Err(CategoricalError::DomainMismatch);
     }
 
@@ -975,15 +860,18 @@ pub fn compute_pushout(
         .map(|&e| (e, tagged_to_pushout_edge[&('C', e)]))
         .collect();
 
-    let f_prime = BHypMorphism::new(b.clone(), pushout.clone(), b_to_d_nodes, b_to_d_edges)?;
+    let b = Rc::clone(&f.codomain);
+    let c = Rc::clone(&g.codomain);
+    let pushout = Rc::new(pushout);
+    let f_prime = BHypMorphism::new(
+        b,
+        Rc::clone(&pushout),
+        b_to_d_nodes,
+        b_to_d_edges,
+    )?;
+    let g_prime = BHypMorphism::new(c, pushout, c_to_d_nodes, c_to_d_edges)?;
 
-    let g_prime = BHypMorphism::new(c.clone(), pushout.clone(), c_to_d_nodes, c_to_d_edges)?;
-
-    Ok(PushoutResult {
-        pushout,
-        morphism_from_b: f_prime,
-        morphism_from_c: g_prime,
-    })
+    CoSpan::new(f_prime, g_prime)
 }
 
 // ============================================================================
@@ -1007,7 +895,7 @@ pub fn compute_pullback(
     g: &BHypMorphism, // g: C -> D
 ) -> Result<PullbackResult, CategoricalError> {
     // Verify f and g have the same codomain
-    if f.codomain.nodes() != g.codomain.nodes() || f.codomain.edges() != g.codomain.edges() {
+    if !same_bhyp(&f.codomain, &g.codomain) {
         return Err(CategoricalError::CodomainMismatch);
     }
 
@@ -1119,15 +1007,21 @@ pub fn compute_pullback(
         .map(|(&(_, c_n), &p_n)| (p_n, c_n))
         .collect();
 
-    let p1 = BHypMorphism::new(pullback.clone(), b.clone(), p_to_b_nodes, p_to_b_edges)?;
-
-    let p2 = BHypMorphism::new(pullback.clone(), c.clone(), p_to_c_nodes, p_to_c_edges)?;
-
-    Ok(PullbackResult {
+    let pullback = Rc::new(pullback);
+    let p1 = BHypMorphism::new(
+        Rc::clone(&pullback),
+        Rc::clone(&f.domain),
+        p_to_b_nodes,
+        p_to_b_edges,
+    )?;
+    let p2 = BHypMorphism::new(
         pullback,
-        morphism_to_b: p1,
-        morphism_to_c: p2,
-    })
+        Rc::clone(&g.domain),
+        p_to_c_nodes,
+        p_to_c_edges,
+    )?;
+
+    Span::new(p1, p2)
 }
 
 // ============================================================================
@@ -1137,6 +1031,10 @@ pub fn compute_pushout_complement(
     l: &BHypMorphism, // l: K -> L
     m: &BHypMorphism, // m: L -> G
 ) -> Result<PushoutComplementResult, CategoricalError> {
+    if !same_bhyp(&l.codomain, &m.domain) {
+        return Err(CategoricalError::DomainMismatch);
+    }
+
     let k = &l.domain;
     let l_graph = &l.codomain;
     let g = &m.codomain;
@@ -1672,71 +1570,32 @@ pub fn compute_pushout_complement(
     // Build morphisms K -> C and C -> G
     // ========================================================================
 
+    let complement = Rc::new(complement);
     let k_to_c = BHypMorphism::new(
-        k.clone(),
-        complement.clone(),
+        Rc::clone(&l.domain),
+        Rc::clone(&complement),
         k_to_c_nodes,
         k_to_c_edges,
     )?;
 
     let c_to_g = BHypMorphism::new(
-        complement.clone(),
-        g.clone(),
+        Rc::clone(&complement),
+        Rc::clone(&m.codomain),
         c_to_g_nodes,
         c_to_g_edges,
     )?;
 
     Ok(PushoutComplementResult {
-        complement,
         morphism_from_k: k_to_c,
         morphism_to_g: c_to_g,
     })
 }
 
-
-/// Helper function to resolve a G-node to the appropriate C-node
-/// For context nodes: direct mapping
-/// For interface nodes: round-robin among copies to distribute context edges
-fn resolve_g_node_to_c(
-    g_n: NodeId,
-    mlk_node_image: &HashSet<NodeId>,
-    g_to_c_nodes: &HashMap<NodeId, NodeId>,
-    g_to_k_nodes: &HashMap<NodeId, Vec<NodeId>>,
-    k_to_c_nodes: &HashMap<NodeId, NodeId>,
-    interface_node_usage: &mut HashMap<NodeId, usize>,
-) -> NodeId {
-    if mlk_node_image.contains(&g_n) {
-        // Interface node - pick one of the copies
-        let k_nodes = &g_to_k_nodes[&g_n];
-        let usage = interface_node_usage.entry(g_n).or_insert(0);
-        let idx = *usage % k_nodes.len();
-        *usage += 1;
-        k_to_c_nodes[&k_nodes[idx]]
-    } else {
-        // Context node - direct mapping
-        g_to_c_nodes[&g_n]
-    }
-}
-
-
 /// double-pushout diagram
-pub fn dpo(span: &Span, g: &BHyp, m: &BHypMorphism) -> 
-    Result<Span, CategoricalError> {
-    let pc = compute_pushout_complement(&span.to_l, m).unwrap();
-    let pc = compute_pushout_complement(&span.to_l, m).unwrap();
-
-
-    let result = compute_pushout(&span.to_r, &pc.morphism_from_k).unwrap();
-    
-
-    Ok(Span {
-        left : g.clone(),
-        middle : pc.complement.clone(),
-        right: result.pushout.clone(),
-        to_l: pc.morphism_to_g.clone(),
-        to_r: result.morphism_from_c.clone()
-    })
-
+pub fn dpo(span: &Span, _g: &BHyp, m: &BHypMorphism) -> Result<Span, CategoricalError> {
+    let pc = compute_pushout_complement(&span.to_l, m)?;
+    let po = compute_pushout(&span.to_r, &pc.morphism_from_k)?;
+    Span::new(pc.morphism_to_g, po.from_r)
 }
 
 
@@ -1745,28 +1604,35 @@ pub fn compute_coproduct(
     b: &BHyp, // f: A -> B
     c: &BHyp, // g: A -> C
 ) -> Result<PushoutResult, CategoricalError> {
-    let i = BHyp::new();
+    let initial = Rc::new(BHyp::new());
+    let f = BHypMorphism::new(
+        Rc::clone(&initial),
+        Rc::new(b.clone()),
+        HashMap::new(),
+        HashMap::new(),
+    )?;
+    let g = BHypMorphism::new(
+        initial,
+        Rc::new(c.clone()),
+        HashMap::new(),
+        HashMap::new(),
+    )?;
 
-    let f = BHypMorphism::new(i.clone(), b.clone(), HashMap::new(), HashMap::new()).unwrap();
-
-    let g = BHypMorphism::new(i.clone(), c.clone(), HashMap::new(), HashMap::new()).unwrap();
-
-   let coproduct = compute_pushout(&f, &g);
-
-   coproduct
-
+    compute_pushout(&f, &g)
 }
 
 
 pub fn identity_span(g: &BHyp) -> Span {
-    let id = identity_morphism(g);
-    Span {
-        left: g.clone(),
-        middle: g.clone(),
-        right: g.clone(),
-        to_l: id.clone(),
-        to_r: id,
-    }
+    let g = Rc::new(g.clone());
+    let on_nodes = g.nodes().iter().map(|&n| (n, n)).collect();
+    let on_edges = g.edges().iter().map(|&e| (e, e)).collect();
+    let id = BHypMorphism::new_unchecked(
+        Rc::clone(&g),
+        Rc::clone(&g),
+        on_nodes,
+        on_edges,
+    );
+    Span::new(id.clone(), id).expect("identity span shares its domain")
 }
 
 /// Check if two BHyp instances are isomorphic
@@ -1775,122 +1641,9 @@ pub fn are_isomorphic(g1: &BHyp, g2: &BHyp) -> bool {
         return false;
     }
 
-    // Try to find an isomorphism (brute force for small graphs)
-    // This is a simplified check - for larger graphs, more sophisticated algorithms would be needed
-
-    let g1_nodes: Vec<NodeId> = g1.nodes().iter().copied().collect();
-    let g2_nodes: Vec<NodeId> = g2.nodes().iter().copied().collect();
-
-    if g1_nodes.is_empty() && g2_nodes.is_empty() {
-        return g1.edges().is_empty() && g2.edges().is_empty();
-    }
-
-    // For small graphs, try all permutations
-    fn try_isomorphism(
-        g1: &BHyp,
-        g2: &BHyp,
-        g1_nodes: &[NodeId],
-        g2_nodes: &[NodeId],
-        node_map: &mut HashMap<NodeId, NodeId>,
-        idx: usize,
-        used: &mut HashSet<NodeId>,
-    ) -> bool {
-        if idx == g1_nodes.len() {
-            // Check if this node mapping induces a valid edge mapping
-            let mut edge_map: HashMap<EdgeId, EdgeId> = HashMap::new();
-
-            for &e1 in g1.edges() {
-                let mut found = false;
-                for &e2 in g2.edges() {
-                    if edge_map.values().any(|&e| e == e2) {
-                        continue;
-                    }
-
-                    // Check compatibility
-                    let swbs1 = g1.get_sources_with_binding(e1).unwrap();
-                    let swbs2 = g2.get_sources_with_binding(e2).unwrap();
-                    let targets1 = g1.get_targets(e1).unwrap();
-                    let targets2 = g2.get_targets(e2).unwrap();
-
-                    if swbs1.len() != swbs2.len() || targets1.len() != targets2.len() {
-                        continue;
-                    }
-
-                    let mut compatible = true;
-
-                    for (s1, s2) in swbs1.iter().zip(swbs2.iter()) {
-                        if node_map[&s1.source] != s2.source {
-                            compatible = false;
-                            break;
-                        }
-                        if s1.bound.len() != s2.bound.len() {
-                            compatible = false;
-                            break;
-                        }
-                        for (b1, b2) in s1.bound.iter().zip(s2.bound.iter()) {
-                            if node_map[b1] != *b2 {
-                                compatible = false;
-                                break;
-                            }
-                        }
-                    }
-
-                    if !compatible {
-                        continue;
-                    }
-
-                    for (t1, t2) in targets1.iter().zip(targets2.iter()) {
-                        if node_map[t1] != *t2 {
-                            compatible = false;
-                            break;
-                        }
-                    }
-
-                    if !compatible {
-                        continue;
-                    }
-
-                    // Check labels
-                    if g1.get_label(e1) != g2.get_label(e2) {
-                        continue;
-                    }
-
-                    edge_map.insert(e1, e2);
-                    found = true;
-                    break;
-                }
-
-                if !found {
-                    return false;
-                }
-            }
-
-            return true;
-        }
-
-        let n1 = g1_nodes[idx];
-        for &n2 in g2_nodes {
-            if used.contains(&n2) {
-                continue;
-            }
-
-            node_map.insert(n1, n2);
-            used.insert(n2);
-
-            if try_isomorphism(g1, g2, g1_nodes, g2_nodes, node_map, idx + 1, used) {
-                return true;
-            }
-
-            node_map.remove(&n1);
-            used.remove(&n2);
-        }
-
-        false
-    }
-
-    let mut node_map = HashMap::new();
-    let mut used = HashSet::new();
-    try_isomorphism(g1, g2, &g1_nodes, &g2_nodes, &mut node_map, 0, &mut used)
+    find_all_occurrences(g1, g2)
+        .into_iter()
+        .any(|morphism| morphism.is_isomorphism())
 }
 
 
@@ -1904,8 +1657,105 @@ pub fn are_isomorphic(g1: &BHyp, g2: &BHyp) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bhyp::Label;
 
-    
+    #[test]
+    fn occurrence_maps_isolated_pattern_nodes() {
+        let mut pattern = BHyp::new();
+        let isolated = pattern.add_node();
+        let source = pattern.add_node();
+        let target_node = pattern.add_node();
+        pattern
+            .add_edge(
+                vec![SourceWithBinding {
+                    source,
+                    bound: vec![],
+                }],
+                vec![target_node],
+                Some(Label::Symbol("f".to_string())),
+            )
+            .unwrap();
+
+        let mut target = BHyp::new();
+        let target_isolated = target.add_node();
+        let target_source = target.add_node();
+        let target_target = target.add_node();
+        target
+            .add_edge(
+                vec![SourceWithBinding {
+                    source: target_source,
+                    bound: vec![],
+                }],
+                vec![target_target],
+                Some(Label::Symbol("f".to_string())),
+            )
+            .unwrap();
+
+        let occurrences = find_all_occurrences(&pattern, &target);
+        assert_eq!(occurrences.len(), 1);
+        assert_eq!(occurrences[0].on_nodes().len(), pattern.nodes().len());
+        assert_eq!(occurrences[0].map_node(isolated), Some(target_isolated));
+    }
+
+    #[test]
+    fn composition_checks_full_graph_structure() {
+        let mut first = BHyp::new();
+        let source = first.add_node();
+        let target = first.add_node();
+        first
+            .add_edge(
+                vec![SourceWithBinding {
+                    source,
+                    bound: vec![],
+                }],
+                vec![target],
+                Some(Label::Symbol("f".to_string())),
+            )
+            .unwrap();
+
+        let mut structurally_different = BHyp::new();
+        let source = structurally_different.add_node();
+        let target = structurally_different.add_node();
+        structurally_different
+            .add_edge(
+                vec![SourceWithBinding {
+                    source,
+                    bound: vec![],
+                }],
+                vec![target],
+                Some(Label::Symbol("g".to_string())),
+            )
+            .unwrap();
+
+        assert_eq!(first.nodes(), structurally_different.nodes());
+        assert_eq!(first.edges(), structurally_different.edges());
+        assert!(!first.structurally_eq(&structurally_different));
+
+        let first_identity = identity_morphism(&first);
+        let different_identity = identity_morphism(&structurally_different);
+        assert_ne!(first_identity, different_identity);
+        assert_eq!(
+            first_identity.compose(&different_identity),
+            Err(MorphismError::DomainMismatch)
+        );
+    }
+
+    #[test]
+    fn span_rejects_different_middle_graphs_and_shares_equal_ones() {
+        let mut graph = BHyp::new();
+        graph.add_node();
+
+        let valid = Span::new(identity_morphism(&graph), identity_morphism(&graph)).unwrap();
+        assert!(Rc::ptr_eq(&valid.to_l.domain, &valid.to_r.domain));
+
+        let mut different = BHyp::new();
+        different.add_node();
+        different.add_node();
+        assert_eq!(
+            Span::new(identity_morphism(&graph), identity_morphism(&different)).err(),
+            Some(CategoricalError::DomainMismatch)
+        );
+    }
 
     // ========================================================================
     // Basic Morphism Tests
@@ -2215,10 +2065,10 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(result.pushout.nodes().len(), 4);
-        assert_eq!(result.pushout.edges().len(), 2);
+        assert_eq!(result.middle().nodes().len(), 4);
+        assert_eq!(result.middle().edges().len(), 2);
 
-        assert!(are_isomorphic(&result.pushout, &expected));
+        assert!(are_isomorphic(result.middle(), &expected));
 
     }
 
@@ -2275,12 +2125,12 @@ mod tests {
         let result = compute_pushout(&f, &g).unwrap();
 
         // Pushout should have 3 nodes (b1~c2 merged) and 2 edges -composition
-        assert_eq!(result.pushout.nodes().len(), 3);
-        assert_eq!(result.pushout.edges().len(), 2);
+        assert_eq!(result.middle().nodes().len(), 3);
+        assert_eq!(result.middle().edges().len(), 2);
 
         // Check that both morphisms map k1's images to the same node
-        let b1_in_d = result.morphism_from_b.map_node(b1).unwrap();
-        let c2_in_d = result.morphism_from_c.map_node(c2).unwrap();
+        let b1_in_d = result.from_l.map_node(b1).unwrap();
+        let c2_in_d = result.from_r.map_node(c2).unwrap();
         assert_eq!(b1_in_d, c2_in_d);
     }
 
@@ -2368,8 +2218,8 @@ mod tests {
         let result = compute_pushout(&f, &g).unwrap();
 
         // Pushout should have 4 nodes (k1~b1~c1, k2~b2~c2, b3, c3) and 3 edges (h merged, f, g)
-        assert_eq!(result.pushout.nodes().len(), 4);
-        assert_eq!(result.pushout.edges().len(), 3);
+        assert_eq!(result.middle().nodes().len(), 4);
+        assert_eq!(result.middle().edges().len(), 3);
 
         let mut po = BHyp::new();
         let v1 = po.add_node();
@@ -2404,7 +2254,7 @@ mod tests {
         )
         .unwrap();
 
-        assert!(are_isomorphic(&result.pushout, &po));
+        assert!(are_isomorphic(result.middle(), &po));
             
         
     }
@@ -2468,8 +2318,8 @@ mod tests {
         let result = compute_pushout(&f, &g).unwrap();
 
         // result should be λy.f(y)
-        assert_eq!(result.pushout.nodes().len(), 3);
-        assert_eq!(result.pushout.edges().len(), 2);
+        assert_eq!(result.middle().nodes().len(), 3);
+        assert_eq!(result.middle().edges().len(), 2);
 
         let mut gg = BHyp::new();
         let g_y = gg.add_node();
@@ -2498,7 +2348,7 @@ mod tests {
 
         
 
-        assert!(are_isomorphic(&result.pushout, &gg));
+        assert!(are_isomorphic(result.middle(), &gg));
 
     }
 
@@ -2932,8 +2782,8 @@ mod tests {
         let result = compute_pushout_complement(&f, &g).unwrap();
 
         // result should be λy.[](y)
-        assert_eq!(result.complement.nodes().len(), 3);
-        assert_eq!(result.complement.edges().len(), 1);
+        assert_eq!(result.morphism_from_k.codomain().nodes().len(), 3);
+        assert_eq!(result.morphism_from_k.codomain().edges().len(), 1);
 
 
         // C: λy.[]y
@@ -2952,7 +2802,7 @@ mod tests {
         .unwrap();
         
 
-        assert!(are_isomorphic(&result.complement, &c));
+        assert!(are_isomorphic(result.morphism_from_k.codomain(), &c));
     }
 
     // #[test]

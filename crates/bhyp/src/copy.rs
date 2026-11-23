@@ -204,7 +204,7 @@ fn check_copying_conditions(
 
     let t_int = BHyp_with_interface::from_bhyp(t.clone());
 
-    let k_node = shared_node.middle.nodes().iter().next().unwrap();
+    let k_node = shared_node.middle().nodes().iter().next().unwrap();
 
     let im = shared_node.to_l.map_node(*k_node).unwrap();
     
@@ -357,22 +357,22 @@ pub fn compute_n_copies(
         let mut proj_edges: HashMap<EdgeId, EdgeId> = HashMap::new();
 
         // New copy T -> pushout, invert to define projection back to T.
-        for (&t_node, &po_node) in next.morphism_from_c.on_nodes().iter() {
+        for (&t_node, &po_node) in next.from_r.on_nodes().iter() {
             proj_nodes.insert(po_node, t_node);
         }
 
-        for (&t_edge, &po_edge) in next.morphism_from_c.on_edges().iter() {
+        for (&t_edge, &po_edge) in next.from_r.on_edges().iter() {
             proj_edges.insert(po_edge, t_edge);
         }
 
         // Old result -> pushout, compose old projection result -> T.
-        for (&old_node, &po_node) in next.morphism_from_b.on_nodes().iter() {
+        for (&old_node, &po_node) in next.from_l.on_nodes().iter() {
             if let Some(&t_node) = projection.on_nodes().get(&old_node) {
                 proj_nodes.insert(po_node, t_node);
             }
         }
 
-        for (&old_edge, &po_edge) in next.morphism_from_b.on_edges().iter() {
+        for (&old_edge, &po_edge) in next.from_l.on_edges().iter() {
             if let Some(&t_edge) = projection.on_edges().get(&old_edge) {
                 proj_edges.insert(po_edge, t_edge);
             }
@@ -387,11 +387,11 @@ pub fn compute_n_copies(
         //
         // become:
         //
-        //     T --incl_i--> result --next.morphism_from_b--> pushout
+        //     T --incl_i--> result --next.from_l--> pushout
         //
         // New inclusion is:
         //
-        //     next.morphism_from_c : T -> pushout
+        //     next.from_r : T -> pushout
         // -----------------------------------------------------------------
 
         let mut updated_inclusions: Vec<BHypMorphism> = Vec::new();
@@ -403,7 +403,7 @@ pub fn compute_n_copies(
             // Nodes: T -> old result -> new pushout.
             for (&t_node, &old_result_node) in old_incl.on_nodes().iter() {
                 let po_node = next
-                    .morphism_from_b
+                    .from_l
                     .map_node(old_result_node)
                     .ok_or_else(|| {
                         CopyError::InvalidSubhypergraph(format!(
@@ -418,7 +418,7 @@ pub fn compute_n_copies(
             // Edges: T -> old result -> new pushout.
             for (&t_edge, &old_result_edge) in old_incl.on_edges().iter() {
                 let po_edge = next
-                    .morphism_from_b
+                    .from_l
                     .map_edge(old_result_edge)
                     .ok_or_else(|| {
                         CopyError::InvalidSubhypergraph(format!(
@@ -432,7 +432,7 @@ pub fn compute_n_copies(
 
             let updated_incl = BHypMorphism::new(
                 t.clone(),
-                next.pushout.clone(),
+                next.middle().clone(),
                 new_incl_nodes,
                 new_incl_edges,
             )?;
@@ -448,9 +448,9 @@ pub fn compute_n_copies(
         //
         let new_copy_inclusion = BHypMorphism::new(
             t.clone(),
-            next.pushout.clone(),
-            next.morphism_from_c.on_nodes().clone(),
-            next.morphism_from_c.on_edges().clone(),
+            next.middle().clone(),
+            next.from_r.on_nodes().clone(),
+            next.from_r.on_edges().clone(),
         )?;
 
         updated_inclusions.push(new_copy_inclusion);
@@ -459,7 +459,7 @@ pub fn compute_n_copies(
         // Update result.
         // -----------------------------------------------------------------
 
-        result = next.pushout.clone();
+        result = next.middle().clone();
 
         // -----------------------------------------------------------------
         // Update K -> result for the next iteration.
@@ -473,7 +473,7 @@ pub fn compute_n_copies(
         let mut new_k_nodes = HashMap::new();
 
         for (&k_node, &old_result_node) in k_to_tn.on_nodes().iter() {
-            if let Some(&po_node) = next.morphism_from_b.on_nodes().get(&old_result_node) {
+            if let Some(&po_node) = next.from_l.on_nodes().get(&old_result_node) {
                 new_k_nodes.insert(k_node, po_node);
             }
         }
@@ -481,7 +481,7 @@ pub fn compute_n_copies(
         let mut new_k_edges = HashMap::new();
 
         for (&k_edge, &old_result_edge) in k_to_tn.on_edges().iter() {
-            if let Some(&po_edge) = next.morphism_from_b.on_edges().get(&old_result_edge) {
+            if let Some(&po_edge) = next.from_l.on_edges().get(&old_result_edge) {
                 new_k_edges.insert(k_edge, po_edge);
             }
         }
@@ -586,7 +586,7 @@ pub fn copy_subhypergraph(
     check_copying_conditions(g, t, shared_node.clone())?;
 
     let k_node = shared_node
-        .middle
+        .middle()
         .nodes()
         .iter()
         .next()
@@ -631,7 +631,7 @@ pub fn copy_subhypergraph(
     //
     let pc = compute_pushout_complement(&projection, &incl)?;
 
-    Ok(pc.complement)
+    Ok(pc.morphism_from_k.codomain().clone())
 }
 
 #[cfg(test)]
@@ -802,12 +802,7 @@ mod copying_tests {
 
         ).unwrap();
 
-        let shared_node = Span{
-            left : g.clone(),
-            middle : k,
-            right : t.clone(),
-            to_l: l,
-            to_r: r};
+        let shared_node = Span::new(r, l).unwrap();
 
         
 
@@ -976,16 +971,10 @@ fn copy_simple_subhyp() {
     //
     //     G <- K -> T
     //
-    let shared_node = Span {
-        left: g.clone(),
-        middle: k,
-        right: t.clone(),
-        to_l: k_to_g,
-        to_r: k_to_t,
-    };
+    let shared_node = Span::new(k_to_g, k_to_t).unwrap();
 
     // Sanity check: the selected G node has out-degree 3.
-    let k_node = shared_node.middle.nodes().iter().next().copied().unwrap();
+    let k_node = shared_node.middle().nodes().iter().next().copied().unwrap();
     let selected_g_node = shared_node.to_l.map_node(k_node).unwrap();
     let n = g.out_degree(selected_g_node);
 
@@ -1119,12 +1108,7 @@ fn copy_simple_subhyp() {
 
         ).unwrap();
 
-        let shared_node = Span{
-            left : g.clone(),
-            middle : k,
-            right : t.clone(),
-            to_l: l,
-            to_r: r};
+        let shared_node = Span::new(r, l).unwrap();
 
         // Perform the copy
     //    let result = copy_subhypergraph(&g, &t, shared_node).expect("Copy operation failed");
@@ -1180,8 +1164,8 @@ pub fn glue_subhypergraph(
     let pushout_res = compute_pushout(&incl, &proj)?;
 
     Ok(GlueResult {
-        result: pushout_res.pushout,
-        morphism: pushout_res.morphism_from_b, 
+        result: pushout_res.middle().clone(),
+        morphism: pushout_res.from_l,
     })
     
     

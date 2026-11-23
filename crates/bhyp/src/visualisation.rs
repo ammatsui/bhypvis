@@ -721,7 +721,7 @@ pub fn pushout_to_dot(
     let a = f.domain();  // Common domain
     let b = f.codomain();
     let c = g.codomain();
-    let d = &result.pushout;
+    let d = result.middle();
 
     // Top row: A, B
     writeln!(dot, "  // Top row").unwrap();
@@ -778,10 +778,10 @@ pub fn pushout_to_dot(
         dot.push_str(&morphism_mappings_to_dot(g, "a", "c", "green", "purple", config));
 
         writeln!(dot, "  // Detailed mappings (g': B -> D)").unwrap();
-        dot.push_str(&morphism_mappings_to_dot(&result.morphism_from_b, "b", "d", "orange", "purple", config));
+        dot.push_str(&morphism_mappings_to_dot(&result.from_l, "b", "d", "orange", "purple", config));
 
         writeln!(dot, "  // Detailed mappings (f': C -> D)").unwrap();
-        dot.push_str(&morphism_mappings_to_dot(&result.morphism_from_c, "c", "d", "brown", "purple", config));
+        dot.push_str(&morphism_mappings_to_dot(&result.from_r, "c", "d", "brown", "purple", config));
     }
 
     // Pushout symbol
@@ -817,7 +817,7 @@ pub fn pullback_to_dot(
     let b = f.domain();
     let c = g.domain();
     let d = f.codomain();  // Common codomain
-    let p = &result.pullback;
+    let p = result.middle();
 
     // Top row: P, B
     writeln!(dot, "  // Top row").unwrap();
@@ -868,10 +868,10 @@ pub fn pullback_to_dot(
     if config.show_detailed_mappings {
         writeln!(dot).unwrap();
         writeln!(dot, "  // Detailed mappings (π₁: P -> B)").unwrap();
-        dot.push_str(&morphism_mappings_to_dot(&result.morphism_to_b, "p", "b", "blue", "purple", config));
+        dot.push_str(&morphism_mappings_to_dot(&result.to_l, "p", "b", "blue", "purple", config));
 
         writeln!(dot, "  // Detailed mappings (π₂: P -> C)").unwrap();
-        dot.push_str(&morphism_mappings_to_dot(&result.morphism_to_c, "p", "c", "orange", "purple", config));
+        dot.push_str(&morphism_mappings_to_dot(&result.to_r, "p", "c", "orange", "purple", config));
 
         writeln!(dot, "  // Detailed mappings (f: B -> D)").unwrap();
         dot.push_str(&morphism_mappings_to_dot(f, "b", "d", "green", "purple", config));
@@ -915,7 +915,7 @@ pub fn pushout_complement_to_dot(
     let k = l.domain();
     let l_bhyp = l.codomain();
     let g = m.codomain();
-    let c = &result.complement;
+    let c = result.morphism_from_k.codomain();
 
     // Top row: K, L
     writeln!(dot, "  // Top row: K -> L").unwrap();

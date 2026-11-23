@@ -23,7 +23,7 @@ pub enum Label {
 }
 
 /// Binding signature: maps function symbols to their binding arities
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Signature {
     /// Maps symbol names to their binding arities (list of number of bound vars per argument)
     pub symbols: HashMap<String, Vec<usize>>,
@@ -295,6 +295,16 @@ impl BHyp {
 
     pub fn is_empty(&self) -> bool {
         self.nodes.is_empty() && self.edges.is_empty()
+    }
+
+    /// Compare graph contents without relying on allocation identity.
+    pub fn structurally_eq(&self, other: &Self) -> bool {
+        self.nodes == other.nodes
+            && self.edges == other.edges
+            && self.targets == other.targets
+            && self.sources_with_binding == other.sources_with_binding
+            && self.labels == other.labels
+            && self.signature == other.signature
     }
 
     pub fn is_first_order(&self) -> bool {

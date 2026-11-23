@@ -172,6 +172,7 @@ pub struct Context {
         /// H2 -> G2 -> H1 -> G1
         /// ```
         pub fn compose(&self, inner: &Context) -> Result<Context, ContextError> {
+            //ToDo: should match interface not the entire hole graph
             let iso_g2_to_h1 = find_isomorphism(inner.shape(), self.hole()).ok_or_else(|| {
                 ContextError::NoIsomorphism(
                     "inner shape G2 is not isomorphic to outer hole H1".to_string(),
@@ -286,7 +287,7 @@ pub struct Context {
                 .map_err(ContextError::InvalidInclusion)?;
 
             let po = compute_pushout(self.inclusion(), hole_to_filler)?;
-            Ok(po.pushout)
+            Ok(po.middle().clone())
         }
 
         /// Fill this context's hole with a filler graph with interface.
@@ -321,7 +322,7 @@ pub struct Context {
             let pc = compute_pushout_complement(
                 &i_map,
                 &self.inclusion).unwrap();
-            Ok(pc.complement)
+            Ok(pc.morphism_from_k.codomain().clone())
         }
     }
 
@@ -544,8 +545,8 @@ pub fn apply_substitution_to_span(
     shared_l: &Span,
     shared_r: &Span,
 ) -> Result<Span, SubstitutionError> {
-    let l_with_interface = BHyp_with_interface::from_bhyp(span.left.clone());
-    let r_with_interface = BHyp_with_interface::from_bhyp(span.right.clone());
+    let l_with_interface = BHyp_with_interface::from_bhyp(span.left().clone());
+    let r_with_interface = BHyp_with_interface::from_bhyp(span.right().clone());
 
     let l_dpo = apply_substitution_span(
         &l_with_interface,
@@ -559,12 +560,12 @@ pub fn apply_substitution_to_span(
         shared_r,
     )?;
 
-    let k_prime = span.middle.clone();
+    let k_prime = span.middle().clone();
 
     let mut k_to_l_prime_nodes = HashMap::new();
     let mut k_to_r_prime_nodes = HashMap::new();
 
-    for &k_node in span.middle.nodes() {
+    for &k_node in span.middle().nodes() {
         let old_l_node = span.to_l.map_node(k_node).ok_or_else(|| {
             SubstitutionError::InvalidConstruction(format!(
                 "span.to_l does not map K node {:?}",
@@ -600,7 +601,7 @@ pub fn apply_substitution_to_span(
     let mut k_to_l_prime_edges = HashMap::new();
     let mut k_to_r_prime_edges = HashMap::new();
 
-    for &k_edge in span.middle.edges() {
+    for &k_edge in span.middle().edges() {
         let old_l_edge = span.to_l.map_edge(k_edge).ok_or_else(|| {
             SubstitutionError::InvalidConstruction(format!(
                 "span.to_l does not map K edge {:?}",
@@ -635,7 +636,7 @@ pub fn apply_substitution_to_span(
 
     let to_l_prime = BHypMorphism::new(
         k_prime.clone(),
-        l_dpo.right.clone(),
+        l_dpo.right().clone(),
         k_to_l_prime_nodes,
         k_to_l_prime_edges,
     )
@@ -643,19 +644,14 @@ pub fn apply_substitution_to_span(
 
     let to_r_prime = BHypMorphism::new(
         k_prime.clone(),
-        r_dpo.right.clone(),
+        r_dpo.right().clone(),
         k_to_r_prime_nodes,
         k_to_r_prime_edges,
     )
     .map_err(|e| SubstitutionError::InvalidConstruction(e.to_string()))?;
 
-    Ok(Span {
-        left: l_dpo.right,
-        middle: k_prime,
-        right: r_dpo.right,
-        to_l: to_l_prime,
-        to_r: to_r_prime,
-    })
+    Span::new(to_l_prime, to_r_prime)
+        .map_err(|e| SubstitutionError::InvalidConstruction(e.to_string()))
 }
 
     // =========================================================================
@@ -697,8 +693,8 @@ pub fn apply_substitution_to_span(
                 ));
             }
 
-            let left_metas = metavariables_in(&span.left);
-            let right_metas = metavariables_in(&span.right);
+            let left_metas = metavariables_in(span.left());
+            let right_metas = metavariables_in(span.right());
 
             if left_metas != right_metas {
                 return Err(RewriteRuleError::MetavariableMismatch {
@@ -718,15 +714,15 @@ pub fn apply_substitution_to_span(
         }
 
         pub fn left(&self) -> &BHyp {
-            &self.span.left
+            self.span.left()
         }
 
         pub fn interface(&self) -> &BHyp {
-            &self.span.middle
+            self.span.middle()
         }
 
         pub fn right(&self) -> &BHyp {
-            &self.span.right
+            self.span.right()
         }
 
         pub fn metavariables(&self) -> &HashSet<Label> {
@@ -752,10 +748,10 @@ pub fn apply_substitution_to_span(
            
 
             let mut instantiated_left =
-                BHyp_with_interface::from_bhyp(self.span.left.clone());
+                BHyp_with_interface::from_bhyp(self.span.left().clone());
 
             let mut instantiated_right =
-                BHyp_with_interface::from_bhyp(self.span.right.clone());
+                BHyp_with_interface::from_bhyp(self.span.right().clone());
 
             let mut subst_span = self.span.clone();
 
@@ -769,13 +765,13 @@ pub fn apply_substitution_to_span(
                     &rs.shared_for_right,
                 )?;
 
-                instantiated_left = BHyp_with_interface::from_bhyp(new_span.left.clone());
+                instantiated_left = BHyp_with_interface::from_bhyp(new_span.left().clone());
 
-                instantiated_right = BHyp_with_interface::from_bhyp(new_span.right.clone());
+                instantiated_right = BHyp_with_interface::from_bhyp(new_span.right().clone());
                 subst_span = new_span.clone();
 
                 // sanity check
-                assert!(are_isomorphic(&subst_span.left, &instantiated_left.bhyp()));
+                assert!(are_isomorphic(subst_span.left(), &instantiated_left.bhyp()));
             }
 
             // let left_bhyp = instantiated_left.bhyp().clone();
@@ -844,15 +840,15 @@ pub fn apply_substitution_to_span(
         }
 
         pub fn left(&self) -> &BHyp {
-            &self.span.left
+            self.span.left()
         }
 
         pub fn interface(&self) -> &BHyp {
-            &self.span.middle
+            self.span.middle()
         }
 
         pub fn right(&self) -> &BHyp {
-            &self.span.right
+            self.span.right()
         }
 
         /// Apply the instantiated rule by DPO-I after checking that the induced
@@ -886,7 +882,7 @@ pub fn apply_substitution_to_span(
 
             let result_span = dpo(&self.span, target, match_morphism)?;
 
-            Ok(result_span.right)
+            Ok(result_span.right().clone())
         }
 
         /// Same as `apply_dpoi`, but without the context restriction.
@@ -902,7 +898,7 @@ pub fn apply_substitution_to_span(
 
             let result_span = dpo(&self.span, target, match_morphism)?;
 
-            Ok(result_span.right)
+            Ok(result_span.right().clone())
         }
 
         fn validate_match(
@@ -910,8 +906,7 @@ pub fn apply_substitution_to_span(
             target: &BHyp,
             match_morphism: &BHypMorphism,
         ) -> Result<(), RewriteRuleError> {
-            if match_morphism.domain().nodes() != self.span.left.nodes()
-                || match_morphism.domain().edges() != self.span.left.edges()
+            if !match_morphism.domain().structurally_eq(self.span.left())
             {
                 return Err(RewriteRuleError::MatchDomainMismatch);
             }
@@ -954,32 +949,28 @@ pub fn apply_substitution_to_span(
     }
 
     pub fn validate_span(span: &Span) -> Result<(), RewriteRuleError> {
-        if span.to_l.domain().nodes() != span.middle.nodes()
-            || span.to_l.domain().edges() != span.middle.edges()
+        if !span.to_l.domain().structurally_eq(span.middle())
         {
             return Err(RewriteRuleError::InvalidSpan(
                 "to_l domain is not K".to_string(),
             ));
         }
 
-        if span.to_l.codomain().nodes() != span.left.nodes()
-            || span.to_l.codomain().edges() != span.left.edges()
+        if !span.to_l.codomain().structurally_eq(span.left())
         {
             return Err(RewriteRuleError::InvalidSpan(
                 "to_l codomain is not L".to_string(),
             ));
         }
 
-        if span.to_r.domain().nodes() != span.middle.nodes()
-            || span.to_r.domain().edges() != span.middle.edges()
+        if !span.to_r.domain().structurally_eq(span.middle())
         {
             return Err(RewriteRuleError::InvalidSpan(
                 "to_r domain is not K".to_string(),
             ));
         }
 
-        if span.to_r.codomain().nodes() != span.right.nodes()
-            || span.to_r.codomain().edges() != span.right.edges()
+        if !span.to_r.codomain().structurally_eq(span.right())
         {
             return Err(RewriteRuleError::InvalidSpan(
                 "to_r codomain is not R".to_string(),
@@ -1017,13 +1008,8 @@ pub fn apply_substitution_to_span(
         )
         .map_err(|e| RewriteRuleError::InvalidMorphism(e.to_string()))?;
 
-        Ok(Span {
-            left: g.clone(),
-            middle: k,
-            right: t.clone(),
-            to_l,
-            to_r,
-        })
+        Span::new(to_l, to_r)
+            .map_err(|e| RewriteRuleError::InvalidSpan(e.to_string()))
     }
 
     /// Convenience constructor for a `RuleSubstitution` where no shared variables
@@ -1422,9 +1408,9 @@ mod rewrite_tests {
     }
 
     fn save_span_images(test_name: &str, prefix: &str, span: &Span) {
-        save_bhyp_image(test_name, &format!("{}_left", prefix), &span.left);
-        save_bhyp_image(test_name, &format!("{}_middle", prefix), &span.middle);
-        save_bhyp_image(test_name, &format!("{}_right", prefix), &span.right);
+        save_bhyp_image(test_name, &format!("{}_left", prefix), span.left());
+        save_bhyp_image(test_name, &format!("{}_middle", prefix), span.middle());
+        save_bhyp_image(test_name, &format!("{}_right", prefix), span.right());
 
         save_morphism_image(
             test_name,
@@ -1593,13 +1579,7 @@ mod rewrite_tests {
         )
         .unwrap();
 
-        let rule_span = Span {
-            left: l.clone(),
-            middle: k.clone(),
-            right: r.clone(),
-            to_l,
-            to_r,
-        };
+        let rule_span = Span::new(to_l, to_r).unwrap();
         save_span_images(test_name, "rule_span_before_instantiation", &rule_span);
 
         let rule = RewriteRule::new(rule_span).unwrap();

@@ -361,17 +361,17 @@ pub fn apply_substitution_span(
     let nim_result = compute_coproduct(n_m.input_interface(), n_m.output_interface())
         .map_err(|e| SubstitutionError::InvalidConstruction(format!("{:?}", e)))?;
 
-    let nim_graph = &nim_result.pushout;
+    let nim_graph = nim_result.middle();
 
-    let nm_k_result = compute_coproduct(n_m.bhyp(), &shared.middle)
+    let nm_k_result = compute_coproduct(n_m.bhyp(), shared.middle())
         .map_err(|e| SubstitutionError::InvalidConstruction(format!("{:?}", e)))?;
 
-    let nm_k = &nm_k_result.pushout;
+    let nm_k = nm_k_result.middle();
 
-    let nim_k_result = compute_coproduct(nim_graph, &shared.middle)
+    let nim_k_result = compute_coproduct(nim_graph, shared.middle())
         .map_err(|e| SubstitutionError::InvalidConstruction(format!("{:?}", e)))?;
 
-    let nim_k = &nim_k_result.pushout;
+    let nim_k = nim_k_result.middle();
 
 
     // ---------------------------------------------------------------------
@@ -386,16 +386,16 @@ pub fn apply_substitution_span(
     let mut to_l_nodes = HashMap::new();
 
     // n·I_M part.
-    for (&nim_node, &nim_k_node) in nim_k_result.morphism_from_b.on_nodes() {
+    for (&nim_node, &nim_k_node) in nim_k_result.from_l.on_nodes() {
         let nm_node = if let Some((&in_node, _)) = nim_result
-            .morphism_from_b
+            .from_l
             .on_nodes()
             .iter()
             .find(|(_, &v)| v == nim_node)
         {
             n_m.input_map()[&in_node]
         } else if let Some((&out_node, _)) = nim_result
-            .morphism_from_c
+            .from_r
             .on_nodes()
             .iter()
             .find(|(_, &v)| v == nim_node)
@@ -409,7 +409,7 @@ pub fn apply_substitution_span(
         };
 
         let nm_k_node = nm_k_result
-            .morphism_from_b
+            .from_l
             .map_node(nm_node)
             .ok_or_else(|| {
                 SubstitutionError::InvalidConstruction(format!(
@@ -422,9 +422,9 @@ pub fn apply_substitution_span(
     }
 
     // K part.
-    for (&k_node, &nim_k_node) in nim_k_result.morphism_from_c.on_nodes() {
+    for (&k_node, &nim_k_node) in nim_k_result.from_r.on_nodes() {
         let nm_k_node = nm_k_result
-            .morphism_from_c
+            .from_r
             .map_node(k_node)
             .ok_or_else(|| {
                 SubstitutionError::InvalidConstruction(format!(
@@ -476,13 +476,13 @@ pub fn apply_substitution_span(
     let find_nim_node_for_nm_node = |nm_node: NodeId| -> Option<NodeId> {
         for (&in_iface_node, &mapped_nm_node) in n_m.input_map() {
             if mapped_nm_node == nm_node {
-                return nim_result.morphism_from_b.map_node(in_iface_node);
+                return nim_result.from_l.map_node(in_iface_node);
             }
         }
 
         for (&out_iface_node, &mapped_nm_node) in n_m.output_map() {
             if mapped_nm_node == nm_node {
-                return nim_result.morphism_from_c.map_node(out_iface_node);
+                return nim_result.from_r.map_node(out_iface_node);
             }
         }
 
@@ -517,7 +517,7 @@ pub fn apply_substitution_span(
 
             // n·I_M -> n·I_M ⊔ K
             let nim_k_node = nim_k_result
-                .morphism_from_b
+                .from_l
                 .map_node(nim_node)
                 .ok_or_else(|| {
                     SubstitutionError::InvalidConstruction(format!(
@@ -576,7 +576,7 @@ pub fn apply_substitution_span(
         }
     };
 
-    for (&k_node, &nim_k_node) in nim_k_result.morphism_from_c.on_nodes() {
+    for (&k_node, &nim_k_node) in nim_k_result.from_r.on_nodes() {
         let t_node = shared.to_r.map_node(k_node).ok_or_else(|| {
             SubstitutionError::InvalidConstruction(format!(
                 "shared.to_r does not map K node {:?}",
@@ -608,13 +608,8 @@ pub fn apply_substitution_span(
 
 
 
-    let top_span = Span {
-        left: nm_k.clone(),
-        middle: nim_k.clone(),
-        right: n_t_glued.bhyp().clone(),
-        to_l: to_l_morph,
-        to_r: to_r_morph,
-    };
+    let top_span = Span::new(to_l_morph, to_r_morph)
+        .map_err(|e| SubstitutionError::InvalidConstruction(e.to_string()))?;
 
 
     // ---------------------------------------------------------------------
@@ -636,7 +631,7 @@ pub fn apply_substitution_span(
     let mut match_edges = HashMap::new();
 
     // K part.
-    for (&k_node, &nm_k_node) in nm_k_result.morphism_from_c.on_nodes() {
+    for (&k_node, &nm_k_node) in nm_k_result.from_r.on_nodes() {
         let g_node = shared.to_l.map_node(k_node).ok_or_else(|| {
             SubstitutionError::InvalidConstruction(format!(
                 "shared.to_l does not map K node {:?}",
@@ -647,7 +642,7 @@ pub fn apply_substitution_span(
         match_nodes.insert(nm_k_node, g_node);
     }
 
-    for (&k_edge, &nm_k_edge) in nm_k_result.morphism_from_c.on_edges() {
+    for (&k_edge, &nm_k_edge) in nm_k_result.from_r.on_edges() {
         let g_edge = shared.to_l.map_edge(k_edge).ok_or_else(|| {
             SubstitutionError::InvalidConstruction(format!(
                 "shared.to_l does not map K edge {:?}",
@@ -675,7 +670,7 @@ pub fn apply_substitution_span(
             })?;
 
             let nm_k_node = nm_k_result
-                .morphism_from_b
+                .from_l
                 .map_node(nm_node)
                 .ok_or_else(|| {
                     SubstitutionError::InvalidConstruction(format!(
@@ -703,7 +698,7 @@ pub fn apply_substitution_span(
             })?;
 
             let nm_k_edge = nm_k_result
-                .morphism_from_b
+                .from_l
                 .map_edge(nm_edge)
                 .ok_or_else(|| {
                     SubstitutionError::InvalidConstruction(format!(
@@ -773,7 +768,7 @@ pub fn apply_substitution(
 {
     let res = apply_substitution_span(g, subst, shared).unwrap();
 
-    Ok(BHyp_with_interface::from_bhyp(res.right))
+    Ok(BHyp_with_interface::from_bhyp(res.right().clone()))
 
 }
 #[cfg(test)]
@@ -880,9 +875,9 @@ fn save_morphism_image(
 }
 
 fn save_span_images(test_name: &str, prefix: &str, span: &Span) {
-    save_bhyp_image(test_name, &format!("{}_left", prefix), &span.left);
-    save_bhyp_image(test_name, &format!("{}_middle", prefix), &span.middle);
-    save_bhyp_image(test_name, &format!("{}_right", prefix), &span.right);
+    save_bhyp_image(test_name, &format!("{}_left", prefix), span.left());
+    save_bhyp_image(test_name, &format!("{}_middle", prefix), span.middle());
+    save_bhyp_image(test_name, &format!("{}_right", prefix), span.right());
 
     save_morphism_image(
         test_name,
@@ -1045,23 +1040,20 @@ interface_map.insert(m_target, t_out_iface);
 
     // Empty shared span (K is empty)
     let k = BHyp::new();
-    let shared = Span {
-        left: g.clone(),
-        middle: k.clone(),
-        right: t.clone(),
-        to_l: BHypMorphism::new(
+    let shared = Span::new(
+        BHypMorphism::new(
             k.clone(),
             g.clone(),
             HashMap::new(),
             HashMap::new(),
         ).unwrap(),
-        to_r: BHypMorphism::new(
+        BHypMorphism::new(
             k.clone(),
             t.clone(),
             HashMap::new(),
             HashMap::new(),
         ).unwrap(),
-    };
+    ).unwrap();
 
     let result = apply_substitution(&g_int, &subst, &shared).unwrap();
     assert_eq!(result.bhyp().edges().len(), 1);
@@ -1222,13 +1214,7 @@ fn test_copy_subst_commute() {
         HashMap::new(),
     ).unwrap();
 
-    let shared_span_for_copy = Span {
-        left: g.clone(),
-        middle: k.clone(),
-        right: m.clone(),
-        to_l,
-        to_r,
-    };
+    let shared_span_for_copy = Span::new(to_l, to_r).unwrap();
 
     save_span_images(test_name, "shared_span_for_copy_M", &shared_span_for_copy);
 
@@ -1258,13 +1244,8 @@ fn test_copy_subst_commute() {
         HashMap::new(),
     ).unwrap();
 
-    let shared_span_for_subst_copied = Span {
-        left: gm_copied.clone(),
-        middle: empty_k.clone(),
-        right: t.clone(),
-        to_l: empty_to_gm.clone(),
-        to_r: empty_to_t.clone(),
-    };
+    let shared_span_for_subst_copied =
+        Span::new(empty_to_gm.clone(), empty_to_t.clone()).unwrap();
 
     save_span_images(
         test_name,
@@ -1287,9 +1268,9 @@ fn test_copy_subst_commute() {
     ).unwrap();
 
     save_span_images(test_name, "path1_substitution_result_span", &path1_span);
-    save_bhyp_image(test_name, "path1_result", &path1_span.right);
+    save_bhyp_image(test_name, "path1_result", path1_span.right());
 
-    let path1_result = BHyp_with_interface::from_bhyp(path1_span.right.clone());
+    let path1_result = BHyp_with_interface::from_bhyp(path1_span.right().clone());
 
     assert_eq!(path1_result.bhyp().edges().len(), 4);
     assert_eq!(path1_result.bhyp().nodes().len(), 8);
@@ -1302,13 +1283,7 @@ fn test_copy_subst_commute() {
         HashMap::new(),
     ).unwrap();
 
-    let shared_span_for_subst = Span {
-        left: g.clone(),
-        middle: empty_k.clone(),
-        right: t.clone(),
-        to_l: empty_to_g,
-        to_r: empty_to_t.clone(),
-    };
+    let shared_span_for_subst = Span::new(empty_to_g, empty_to_t.clone()).unwrap();
 
     save_span_images(
         test_name,
@@ -1336,7 +1311,8 @@ fn test_copy_subst_commute() {
         &g_substitution_span,
     );
 
-    let g_substituted = BHyp_with_interface::from_bhyp(g_substitution_span.right.clone());
+    let g_substituted =
+        BHyp_with_interface::from_bhyp(g_substitution_span.right().clone());
     let g_subst_bhyp = g_substituted.bhyp();
 
     save_bhyp_image(test_name, "path2_after_substitution", &g_subst_bhyp);
@@ -1373,13 +1349,7 @@ fn test_copy_subst_commute() {
         HashMap::new(),
     ).unwrap();
 
-    let shared_span_for_copy_t = Span {
-        left: g_subst_bhyp.clone(),
-        middle: k_t,
-        right: t.clone(),
-        to_l: to_l_t,
-        to_r: to_r_t,
-    };
+    let shared_span_for_copy_t = Span::new(to_l_t, to_r_t).unwrap();
 
     save_span_images(
         test_name,
@@ -1630,6 +1600,4 @@ fn test_copy_subst_commute() {
 // }
 
 }
-
-
 
