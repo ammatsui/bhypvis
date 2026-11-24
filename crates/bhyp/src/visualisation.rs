@@ -915,7 +915,7 @@ pub fn pushout_complement_to_dot(
     let k = l.domain();
     let l_bhyp = l.codomain();
     let g = m.codomain();
-    let c = result.morphism_from_k.codomain();
+    let c = result.context();
 
     // Top row: K, L
     writeln!(dot, "  // Top row: K -> L").unwrap();
@@ -969,13 +969,13 @@ pub fn pushout_complement_to_dot(
         dot.push_str(&morphism_mappings_to_dot(l, "k", "l", "blue", "purple", config));
 
         writeln!(dot, "  // Detailed mappings (k: K -> C)").unwrap();
-        dot.push_str(&morphism_mappings_to_dot(&result.morphism_from_k, "k", "c", "green", "purple", config));
+        dot.push_str(&morphism_mappings_to_dot(&result.to_context, "k", "c", "green", "purple", config));
 
         writeln!(dot, "  // Detailed mappings (m: L -> G)").unwrap();
         dot.push_str(&morphism_mappings_to_dot(m, "l", "g", "orange", "purple", config));
 
         writeln!(dot, "  // Detailed mappings (c: C -> G)").unwrap();
-        dot.push_str(&morphism_mappings_to_dot(&result.morphism_to_g, "c", "g", "brown", "purple", config));
+        dot.push_str(&morphism_mappings_to_dot(&result.context_to_target, "c", "g", "brown", "purple", config));
     }
 
     // Pushout symbol
@@ -1079,7 +1079,7 @@ mod tests {
     #[test]
     fn test_morphism_dot() {
         let g = create_simple_graph();
-        let id = identity_morphism(&g);
+        let id = identity_morphism(&std::rc::Rc::new(g.clone()));
         let dot = morphism_to_dot_labelled(&id);
         
         assert!(dot.contains("digraph Morphism"));
@@ -1206,7 +1206,7 @@ mod tests {
     #[test]
     fn test_config_without_detailed_mappings() {
         let g = create_simple_graph();
-        let id = identity_morphism(&g);
+        let id = identity_morphism(&std::rc::Rc::new(g.clone()));
         
         let config = DotConfig::without_detailed_mappings();
         let dot = morphism_to_dot(&id, &config);

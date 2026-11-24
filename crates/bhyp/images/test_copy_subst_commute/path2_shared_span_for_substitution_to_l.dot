@@ -22,23 +22,23 @@ digraph Morphism {
     fontname="Helvetica";
     fontsize=12;
 
-    cod_n1 [label="1", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
-    cod_n5 [label="5", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
-    cod_n0 [label="0", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
     cod_n2 [label="2", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+    cod_n0 [label="0", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
     cod_n3 [label="3", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+    cod_n5 [label="5", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
     cod_n4 [label="4", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+    cod_n1 [label="1", shape=circle, style=filled, fillcolor=white, color="black", width=0.2, height=0.2, fixedsize=true];
+    cod_e2 [label="G1", shape=box, style=rounded, color="black"];
     cod_e0 [label="M:2", shape=ellipse, style=rounded, color="orange"];
     cod_e1 [label="G2", shape=box, style=rounded, color="black"];
-    cod_e2 [label="G1", shape=box, style=rounded, color="black"];
+    cod_n2 -> cod_e2 [label=""];
+    cod_e2 -> cod_n4 [label=""];
     cod_n0 -> cod_e0 [label="0"];
     cod_n1 -> cod_e0 [label="1"];
     cod_e0 -> cod_n2 [label=""];
     cod_n2 -> cod_e1 [label="0"];
     cod_n3 -> cod_e1 [label="1"];
     cod_e1 -> cod_n5 [label=""];
-    cod_n2 -> cod_e2 [label=""];
-    cod_e2 -> cod_n4 [label=""];
     cod_anchor [shape=point, width=0, height=0, style=invis];
   }
 

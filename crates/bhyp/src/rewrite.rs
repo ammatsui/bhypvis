@@ -311,18 +311,16 @@ pub struct Context {
 
         pub fn complement(&self) -> Result<BHyp, ContextError> {
             let ihole = BHyp_with_interface::from_bhyp(self.hole().clone());
-            let iface = ihole.combined_interface();
+            let (iface, iface_to_hole_map) = ihole.combined_interface_with_map();
 
             let i_map = BHypMorphism::new(
-                iface.clone(),
-                self.shape().clone(),
-                ihole.combined_interface_map(),
+                iface,
+                self.hole().clone(),
+                iface_to_hole_map,
                 HashMap::new()
             )?;
-            let pc = compute_pushout_complement(
-                &i_map,
-                &self.inclusion).unwrap();
-            Ok(pc.morphism_from_k.codomain().clone())
+            let pc = compute_pushout_complement(&i_map, &self.inclusion)?;
+            Ok(pc.context().clone())
         }
     }
 
@@ -880,9 +878,9 @@ pub fn apply_substitution_to_span(
                 return Err(RewriteRuleError::ContextNotAllowed);
             }
 
-            let result_span = dpo(&self.span, target, match_morphism)?;
+            let (_, pushout) = dpo(&self.span, match_morphism)?;
 
-            Ok(result_span.right().clone())
+            Ok(pushout.apex().clone())
         }
 
         /// Same as `apply_dpoi`, but without the context restriction.
@@ -896,9 +894,9 @@ pub fn apply_substitution_to_span(
         ) -> Result<BHyp, RewriteRuleError> {
             self.validate_match(target, match_morphism)?;
 
-            let result_span = dpo(&self.span, target, match_morphism)?;
+            let (_, pushout) = dpo(&self.span, match_morphism)?;
 
-            Ok(result_span.right().clone())
+            Ok(pushout.apex().clone())
         }
 
         fn validate_match(
@@ -1087,7 +1085,44 @@ use super::*;
         assert_eq!(compl.nodes().len(), 3);
         assert_eq!(compl.edges().len(), 1);
 
-    
+
+    }
+
+    #[test]
+    fn context_complement_handles_renumbered_hole_nodes() {
+        let mut shape = BHyp::new();
+        shape.add_node();
+        shape.add_node();
+        let shape_source = shape.add_node();
+        let shape_target = shape.add_node();
+        shape.add_edge(
+            vec![SourceWithBinding {
+                source: shape_source,
+                bound: vec![],
+            }],
+            vec![shape_target],
+            Some(Label::Symbol("e".to_string())),
+        ).unwrap();
+
+        let mut hole = BHyp::new();
+        let hole_source = hole.add_node();
+        let hole_target = hole.add_node();
+        hole.add_edge(
+            vec![SourceWithBinding {
+                source: hole_source,
+                bound: vec![],
+            }],
+            vec![hole_target],
+            Some(Label::Symbol("e".to_string())),
+        ).unwrap();
+
+        let context = Context::from_hole_and_shape(&hole, &shape).unwrap();
+        assert_ne!(context.inclusion().map_node(hole_source), Some(hole_source));
+        assert_ne!(context.inclusion().map_node(hole_target), Some(hole_target));
+
+        let complement = context.complement().unwrap();
+        assert_eq!(complement.nodes().len(), shape.nodes().len());
+        assert!(complement.edges().is_empty());
     }
 
     #[test]
@@ -1131,7 +1166,9 @@ use super::*;
 
         let ctxt = Context::from_hole_and_shape(&h, &g).unwrap();
         // fill with the original hole H, should get back G
-        let filled = ctxt.fill_with_map(&h, &identity_morphism(&h)).unwrap();
+        let filled = ctxt
+            .fill_with_map(&h, &identity_morphism(&std::rc::Rc::new(h.clone())))
+            .unwrap();
         assert!(are_isomorphic(&filled, &g));
 
     }

@@ -631,7 +631,7 @@ pub fn copy_subhypergraph(
     //
     let pc = compute_pushout_complement(&projection, &incl)?;
 
-    Ok(pc.morphism_from_k.codomain().clone())
+    Ok(pc.context().clone())
 }
 
 #[cfg(test)]

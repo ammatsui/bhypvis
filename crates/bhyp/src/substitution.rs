@@ -750,14 +750,14 @@ pub fn apply_substitution_span(
     // 8. Apply DPO.
     // ---------------------------------------------------------------------
 
-    let result_span = dpo(&top_span, g.bhyp(), &match_morphism)
+    let (complement, pushout) = dpo(&top_span, &match_morphism)
         .map_err(|e| {
             SubstitutionError::InvalidConstruction(format!("DPO Failed: {:?}", e))
         })?;
 
-    Ok(result_span)
+    Span::new(complement.context_to_target, pushout.from_r)
+        .map_err(|e| SubstitutionError::InvalidConstruction(format!("DPO span failed: {:?}", e)))
 
-    //Ok(BHyp_with_interface::from_bhyp(result_span.right))
 }
 
 pub fn apply_substitution(
@@ -1600,4 +1600,3 @@ fn test_copy_subst_commute() {
 // }
 
 }
-

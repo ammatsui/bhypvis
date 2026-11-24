@@ -336,26 +336,16 @@ fn same_bhyp(a: &Rc<BHyp>, b: &Rc<BHyp>) -> bool {
 }
 
 /// Create the identity morphism on a BHyp
-pub fn identity_morphism(bhyp: &BHyp) -> BHypMorphism {
+pub fn identity_morphism(bhyp: &Rc<BHyp>) -> BHypMorphism {
     let on_nodes: HashMap<_, _> = bhyp.nodes().iter().map(|&n| (n, n)).collect();
     let on_edges: HashMap<_, _> = bhyp.edges().iter().map(|&e| (e, e)).collect();
-    let bhyp = Rc::new(bhyp.clone());
-    BHypMorphism::new_unchecked(Rc::clone(&bhyp), bhyp, on_nodes, on_edges)
+    BHypMorphism::new_unchecked(Rc::clone(bhyp), Rc::clone(bhyp), on_nodes, on_edges)
 }
 
 pub fn combined_interface_to_bhyp_morphism(
     bhyp: &BHyp_with_interface,
 ) -> Result<BHypMorphism, MorphismError> {
-    let mut combined_interface = BHyp::new();
-    let mut node_map: HashMap<NodeId, NodeId> = HashMap::new();
-
-    // These are nodes of the underlying BHyp that are either input or output.
-    let combined_nodes = bhyp.combined_interface_nodes();
-
-    for h_node in combined_nodes {
-        let interface_node = combined_interface.add_node();
-        node_map.insert(interface_node, h_node);
-    }
+    let (combined_interface, node_map) = bhyp.combined_interface_with_map();
 
     BHypMorphism::new(
         combined_interface,
@@ -428,6 +418,11 @@ impl CoSpan {
         self.from_l.codomain()
     }
 
+    /// The shared codomain (apex) of both legs.
+    pub fn apex(&self) -> &BHyp {
+        self.from_l.codomain()
+    }
+
     /// The domain of the right leg.
     pub fn right(&self) -> &BHyp {
         self.from_r.domain()
@@ -450,8 +445,14 @@ pub type PullbackResult = Span;
 /// Result of a pushout complement computation
 #[derive(Debug, Clone)]
 pub struct PushoutComplementResult {
-    pub morphism_from_k: BHypMorphism,
-    pub morphism_to_g: BHypMorphism,
+    pub to_context: BHypMorphism,
+    pub context_to_target: BHypMorphism,
+}
+
+impl PushoutComplementResult {
+    pub fn context(&self) -> &BHyp {
+        self.to_context.codomain()
+    }
 }
 
 ///////////////////
@@ -1586,16 +1587,19 @@ pub fn compute_pushout_complement(
     )?;
 
     Ok(PushoutComplementResult {
-        morphism_from_k: k_to_c,
-        morphism_to_g: c_to_g,
+        to_context: k_to_c,
+        context_to_target: c_to_g,
     })
 }
 
 /// double-pushout diagram
-pub fn dpo(span: &Span, _g: &BHyp, m: &BHypMorphism) -> Result<Span, CategoricalError> {
+pub fn dpo(
+    span: &Span,
+    m: &BHypMorphism,
+) -> Result<(PushoutComplementResult, PushoutResult), CategoricalError> {
     let pc = compute_pushout_complement(&span.to_l, m)?;
-    let po = compute_pushout(&span.to_r, &pc.morphism_from_k)?;
-    Span::new(pc.morphism_to_g, po.from_r)
+    let po = compute_pushout(&span.to_r, &pc.to_context)?;
+    Ok((pc, po))
 }
 
 
@@ -1731,6 +1735,8 @@ mod tests {
         assert_eq!(first.edges(), structurally_different.edges());
         assert!(!first.structurally_eq(&structurally_different));
 
+        let first = Rc::new(first);
+        let structurally_different = Rc::new(structurally_different);
         let first_identity = identity_morphism(&first);
         let different_identity = identity_morphism(&structurally_different);
         assert_ne!(first_identity, different_identity);
@@ -1744,6 +1750,7 @@ mod tests {
     fn span_rejects_different_middle_graphs_and_shares_equal_ones() {
         let mut graph = BHyp::new();
         graph.add_node();
+        let graph = Rc::new(graph);
 
         let valid = Span::new(identity_morphism(&graph), identity_morphism(&graph)).unwrap();
         assert!(Rc::ptr_eq(&valid.to_l.domain, &valid.to_r.domain));
@@ -1751,10 +1758,29 @@ mod tests {
         let mut different = BHyp::new();
         different.add_node();
         different.add_node();
+        let different = Rc::new(different);
         assert_eq!(
             Span::new(identity_morphism(&graph), identity_morphism(&different)).err(),
             Some(CategoricalError::DomainMismatch)
         );
+    }
+
+    #[test]
+    fn dpo_returns_pushout_complement_and_pushout() {
+        let mut graph = BHyp::new();
+        graph.add_node();
+        let graph = Rc::new(graph);
+
+        let identity = identity_morphism(&graph);
+        let rule = Span::new(identity.clone(), identity.clone()).unwrap();
+        let (complement, pushout) = dpo(&rule, &identity).unwrap();
+
+        assert!(complement.context().structurally_eq(&graph));
+        assert!(pushout.apex().structurally_eq(&graph));
+        assert!(complement
+            .context_to_target
+            .domain()
+            .structurally_eq(complement.context()));
     }
 
     // ========================================================================
@@ -1776,7 +1802,7 @@ mod tests {
         )
         .unwrap();
 
-        let id = identity_morphism(&g1);
+        let id = identity_morphism(&Rc::new(g1));
         assert_eq!(id.map_node(n1), Some(n1));
         assert_eq!(id.map_node(n2), Some(n2));
     }
@@ -1809,7 +1835,7 @@ mod tests {
         )
         .unwrap();
 
-        let id = identity_morphism(&g);
+        let id = identity_morphism(&Rc::new(g));
         assert_eq!(id.map_node(x), Some(x));
         assert_eq!(id.map_node(fx), Some(fx));
         assert_eq!(id.map_node(out), Some(out));
@@ -2627,8 +2653,8 @@ mod tests {
     //     assert_eq!(result.complement.edges().len(), 1);
 
     //     // Check that k1 is mapped correctly
-    //     let k1_in_c = result.morphism_from_k.map_node(k1).unwrap();
-    //     let k1_in_g = result.morphism_to_g.map_node(k1_in_c).unwrap();
+    //     let k1_in_c = result.to_context.map_node(k1).unwrap();
+    //     let k1_in_g = result.context_to_target.map_node(k1_in_c).unwrap();
     //     assert_eq!(k1_in_g, g1);
     // }
 
@@ -2782,8 +2808,8 @@ mod tests {
         let result = compute_pushout_complement(&f, &g).unwrap();
 
         // result should be λy.[](y)
-        assert_eq!(result.morphism_from_k.codomain().nodes().len(), 3);
-        assert_eq!(result.morphism_from_k.codomain().edges().len(), 1);
+        assert_eq!(result.context().nodes().len(), 3);
+        assert_eq!(result.context().edges().len(), 1);
 
 
         // C: λy.[]y
@@ -2802,7 +2828,7 @@ mod tests {
         .unwrap();
         
 
-        assert!(are_isomorphic(result.morphism_from_k.codomain(), &c));
+        assert!(are_isomorphic(result.context(), &c));
     }
 
     // #[test]
@@ -2985,8 +3011,8 @@ mod tests {
     //     // The pushout should be isomorphic to G
     //     assert!(are_isomorphic(&po_result.pushout, &g));
     //     // Check that k1 is mapped correctly
-    //     let k1_in_c = result.morphism_from_k.map_node(k1).unwrap();
-    //     let k1_in_g = result.morphism_to_g.map_node(k1_in_c).unwrap();
+    //     let k1_in_c = result.to_context.map_node(k1).unwrap();
+    //     let k1_in_g = result.context_to_target.map_node(k1_in_c).unwrap();
     //     assert_eq!(k1_in_g, g1);
     // }
 

@@ -4,6 +4,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::rc::Rc;
 
 /// A node identifier in the hypergraph
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -585,15 +586,19 @@ impl BHyp_with_interface {
         &self.output_interface
     }
 
-    pub fn combined_interface(&self) -> BHyp {
+    /// Build the discrete combined interface and its node map together.
+    ///
+    /// The map keys are node IDs from the returned interface graph.
+    pub fn combined_interface_with_map(&self) -> (Rc<BHyp>, HashMap<NodeId, NodeId>) {
         let mut combined_interface = BHyp::new();
-    
-        for h_node in self.combined_interface_nodes() {
-            let interface_node = combined_interface.add_node();
-            
-        }
-        combined_interface
+        let mut map = HashMap::new();
 
+        for bhyp_node in self.combined_interface_nodes() {
+            let interface_node = combined_interface.add_node();
+            map.insert(interface_node, bhyp_node);
+        }
+
+        (Rc::new(combined_interface), map)
     }
 
     /// Get the input interface nodes as a set of NodeIds (from the main bhyp)
@@ -626,18 +631,6 @@ impl BHyp_with_interface {
     pub fn output_map(&self) -> &HashMap<NodeId, NodeId> {
         &self.output_map
     }
-
-    pub fn combined_interface_map(&self) -> HashMap<NodeId, NodeId> {
-     let mut interface = BHyp::new();
-    let mut map = HashMap::new();
-
-    for bhyp_node in self.combined_interface_nodes() {
-        let iface_node = interface.add_node();
-        map.insert(iface_node, bhyp_node);
-    }
-
-    map
-}
 
     /// Map an input interface node to its corresponding node in the main bhyp
     pub fn map_input_node(&self, interface_node: NodeId) -> Option<NodeId> {
@@ -766,6 +759,18 @@ impl fmt::Display for BHyp_with_interface {
 #[cfg(test)]
 mod interface_tests {
     use super::*;
+
+    #[test]
+    fn combined_interface_map_uses_returned_graph_nodes() {
+        let mut graph = BHyp_with_interface::new();
+        let isolated = graph.add_node();
+
+        let (interface, map) = graph.combined_interface_with_map();
+
+        assert_eq!(map.len(), interface.nodes().len());
+        assert!(map.keys().all(|node| interface.nodes().contains(node)));
+        assert!(map.values().all(|node| *node == isolated));
+    }
 
     #[test]
     fn test_empty_interface() {
