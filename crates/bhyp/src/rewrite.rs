@@ -151,99 +151,163 @@ pub struct Context {
             &self.inclusion
         }
 
-        /// Compose contexts.
-        ///
-        /// If:
-        ///
-        /// ```text
-        /// outer : H1 -> G1
-        /// inner : H2 -> G2
-        /// ```
-        ///
-        /// and `G2 ≅ H1`, then:
-        ///
-        /// ```text
-        /// outer[inner] : H2 -> G1
-        /// ```
-        ///
-        /// The implementation finds an isomorphism `G2 -> H1` and composes:
-        ///
-        /// ```text
-        /// H2 -> G2 -> H1 -> G1
-        /// ```
+        /// Replace the outer hole by the inner shape, gluing along their
+        /// ordered boundary ports instead of requiring the graphs to be isomorphic.
         pub fn compose(&self, inner: &Context) -> Result<Context, ContextError> {
-            //ToDo: should match interface not the entire hole graph
-            let iso_g2_to_h1 = find_isomorphism(inner.shape(), self.hole()).ok_or_else(|| {
-                ContextError::NoIsomorphism(
-                    "inner shape G2 is not isomorphic to outer hole H1".to_string(),
-                )
-            })?;
+            let outer_hole_interface = BHyp_with_interface::from_bhyp(self.hole().clone());
+            let (interface, interface_to_hole) =
+                outer_hole_interface.combined_interface_with_map();
 
-            let h2_to_g2 = inner.inclusion();
-            let h1_to_g1 = self.inclusion();
+            let interface_to_hole = BHypMorphism::new(
+                interface.clone(),
+                self.hole().clone(),
+                interface_to_hole,
+                HashMap::new(),
+            )?;
+            let complement =
+                compute_pushout_complement(&interface_to_hole, &self.inclusion)?;
 
-            let mut h2_to_g1_nodes = HashMap::new();
-            for &h2_n in inner.hole().nodes() {
-                let g2_n = h2_to_g2.map_node(h2_n).ok_or_else(|| {
+            // Select the inner hole's input ports that remain external in its
+            // shape. Any other inner-shape inputs are left unglued.
+            let inner_hole_interface =
+                BHyp_with_interface::from_bhyp(inner.hole().clone());
+            let inner_shape_interface =
+                BHyp_with_interface::from_bhyp(inner.shape().clone());
+            let inner_shape_inputs = inner_shape_interface.input_interface_nodes();
+            let mut inner_input_ports = Vec::new();
+            for hole_node in inner_hole_interface.input_interface_nodes() {
+                let shape_node = inner.inclusion.map_node(hole_node).ok_or_else(|| {
                     ContextError::HoleShapeMismatch(format!(
-                        "inner inclusion does not map node {:?}",
-                        h2_n
+                        "inner inclusion does not map input port {:?}",
+                        hole_node
                     ))
                 })?;
+                if inner_shape_inputs.contains(&shape_node) {
+                    inner_input_ports.push(shape_node);
+                }
+            }
+            // Sorting makes the positional port correspondence deterministic;
+            // extra external inputs in the inner shape are not glued.
+            inner_input_ports.sort();
 
-                let h1_n = iso_g2_to_h1.map_node(g2_n).ok_or_else(|| {
-                    ContextError::HoleShapeMismatch(format!(
-                        "isomorphism G2 -> H1 does not map node {:?}",
-                        g2_n
-                    ))
-                })?;
-
-                let g1_n = h1_to_g1.map_node(h1_n).ok_or_else(|| {
-                    ContextError::HoleShapeMismatch(format!(
-                        "outer inclusion does not map node {:?}",
-                        h1_n
-                    ))
-                })?;
-
-                h2_to_g1_nodes.insert(h2_n, g1_n);
+            let mut outer_input_ports: Vec<NodeId> =
+                outer_hole_interface.input_interface_nodes().into_iter().collect();
+            outer_input_ports.sort();
+            if outer_input_ports.len() > inner_input_ports.len() {
+                return Err(ContextError::InterfaceMismatch(format!(
+                    "outer hole has {} input ports, but the inner shape exposes only {} matching inner-hole inputs",
+                    outer_input_ports.len(),
+                    inner_input_ports.len()
+                )));
             }
 
-            let mut h2_to_g1_edges = HashMap::new();
-            for &h2_e in inner.hole().edges() {
-                let g2_e = h2_to_g2.map_edge(h2_e).ok_or_else(|| {
+            // Outputs are paired by stable NodeId order. Surplus outputs of
+            // the inner shape remain exposed in the composed context.
+            let mut outer_output_ports: Vec<NodeId> =
+                outer_hole_interface.output_interface_nodes().into_iter().collect();
+            outer_output_ports.sort();
+            let mut inner_output_ports: Vec<NodeId> =
+                inner_shape_interface.output_interface_nodes().into_iter().collect();
+            inner_output_ports.sort();
+            if outer_output_ports.len() > inner_output_ports.len() {
+                return Err(ContextError::InterfaceMismatch(format!(
+                    "outer hole has {} output ports, but the inner shape exposes only {}",
+                    outer_output_ports.len(),
+                    inner_output_ports.len()
+                )));
+            }
+
+            let mut hole_to_interface = HashMap::new();
+            for (&interface_node, &hole_node) in interface_to_hole.on_nodes() {
+                hole_to_interface.insert(hole_node, interface_node);
+            }
+            let mut interface_to_inner_nodes = HashMap::new();
+            for (&hole_node, &shape_node) in
+                outer_input_ports.iter().zip(inner_input_ports.iter())
+            {
+                let interface_node = hole_to_interface.get(&hole_node).ok_or_else(|| {
+                    ContextError::InterfaceMismatch(format!(
+                        "outer hole input {:?} is missing from its combined interface",
+                        hole_node
+                    ))
+                })?;
+                interface_to_inner_nodes.insert(*interface_node, shape_node);
+            }
+            for (&hole_node, &shape_node) in
+                outer_output_ports.iter().zip(inner_output_ports.iter())
+            {
+                let interface_node = hole_to_interface.get(&hole_node).ok_or_else(|| {
+                    ContextError::InterfaceMismatch(format!(
+                        "outer hole output {:?} is missing from its combined interface",
+                        hole_node
+                    ))
+                })?;
+                if let Some(previous) =
+                    interface_to_inner_nodes.insert(*interface_node, shape_node)
+                {
+                    if previous != shape_node {
+                        return Err(ContextError::InterfaceMismatch(format!(
+                            "outer hole port {:?} has incompatible input/output matches",
+                            hole_node
+                        )));
+                    }
+                }
+            }
+
+            let interface_to_inner = BHypMorphism::new(
+                interface,
+                inner.shape().clone(),
+                interface_to_inner_nodes,
+                HashMap::new(),
+            )?;
+            let pushout =
+                compute_pushout(&complement.to_context, &interface_to_inner)?;
+
+            // Carry the inner hole inclusion through the pushout injection.
+            let mut composed_nodes = HashMap::new();
+            for &hole_node in inner.hole().nodes() {
+                let shape_node = inner.inclusion.map_node(hole_node).ok_or_else(|| {
+                    ContextError::HoleShapeMismatch(format!(
+                        "inner inclusion does not map node {:?}",
+                        hole_node
+                    ))
+                })?;
+                let result_node = pushout.from_r.map_node(shape_node).ok_or_else(|| {
+                    ContextError::HoleShapeMismatch(format!(
+                        "pushout injection does not map inner-shape node {:?}",
+                        shape_node
+                    ))
+                })?;
+                composed_nodes.insert(hole_node, result_node);
+            }
+
+            let mut composed_edges = HashMap::new();
+            for &hole_edge in inner.hole().edges() {
+                let shape_edge = inner.inclusion.map_edge(hole_edge).ok_or_else(|| {
                     ContextError::HoleShapeMismatch(format!(
                         "inner inclusion does not map edge {:?}",
-                        h2_e
+                        hole_edge
                     ))
                 })?;
-
-                let h1_e = iso_g2_to_h1.map_edge(g2_e).ok_or_else(|| {
+                let result_edge = pushout.from_r.map_edge(shape_edge).ok_or_else(|| {
                     ContextError::HoleShapeMismatch(format!(
-                        "isomorphism G2 -> H1 does not map edge {:?}",
-                        g2_e
+                        "pushout injection does not map inner-shape edge {:?}",
+                        shape_edge
                     ))
                 })?;
-
-                let g1_e = h1_to_g1.map_edge(h1_e).ok_or_else(|| {
-                    ContextError::HoleShapeMismatch(format!(
-                        "outer inclusion does not map edge {:?}",
-                        h1_e
-                    ))
-                })?;
-
-                h2_to_g1_edges.insert(h2_e, g1_e);
+                composed_edges.insert(hole_edge, result_edge);
             }
 
             let composed_inclusion = BHypMorphism::new(
                 inner.hole().clone(),
-                self.shape().clone(),
-                h2_to_g1_nodes,
-                h2_to_g1_edges,
+                pushout.apex().clone(),
+                composed_nodes,
+                composed_edges,
             )?;
 
             Context::new(
                 inner.hole().clone(),
-                self.shape().clone(),
+                pushout.apex().clone(),
                 composed_inclusion,
             )
         }
@@ -1346,7 +1410,8 @@ use super::*;
         let compl = res.complement().unwrap();
 
         assert_eq!(compl.edges().len(), 2);
-        assert_eq!(compl.nodes().len(), 4);
+        // The extra free input g2_y remains exposed after replacement.
+        assert_eq!(compl.nodes().len(), 5);
 
 
         // C1[C2] = \lambda x.M[[], x]

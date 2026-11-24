@@ -8,7 +8,8 @@ use std::collections::{HashMap, HashSet};
 use crate::bhyp::{BHyp, BHyp_with_interface, EdgeId, Label, NodeId, SourceWithBinding};
 use crate::categorical::{
     BHypMorphism, CategoricalError, MorphismError, PushoutResult, Span, 
-    are_isomorphic, compute_pushout, compute_pushout_complement, build_inclusion,
+    are_isomorphic, compute_pushout,
+    compute_pushout_complement_with_context_slots, build_inclusion,
     identity_morphism, find_all_occurrences, find_subhypergraph_inclusion, is_subhypergraph
 };
 
@@ -195,18 +196,32 @@ pub fn check_safe_copying_conditions(
 }
 
 fn check_copying_conditions(
-    g: &BHyp,
     t: &BHyp,
     shared_node: Span,
 ) -> Result<(), CopyError> {
-   
-    let t_inclusion = build_inclusion(t, g).unwrap();
-
     let t_int = BHyp_with_interface::from_bhyp(t.clone());
 
-    let k_node = shared_node.middle().nodes().iter().next().unwrap();
+    let k_node = shared_node
+        .middle()
+        .nodes()
+        .iter()
+        .next()
+        .copied()
+        .ok_or_else(|| {
+            CopyError::InvalidSubhypergraph(
+                "shared_node.middle must contain the distinguished node".to_string(),
+            )
+        })?;
 
-    let im = shared_node.to_l.map_node(*k_node).unwrap();
+    let im = shared_node
+        .to_r
+        .map_node(k_node)
+        .ok_or_else(|| {
+            CopyError::InvalidSubhypergraph(format!(
+                "shared_node.to_r does not map distinguished node {:?}",
+                k_node
+            ))
+        })?;
     
     // Check that shared_node is in T's output interface
     if !t_int.is_output(im) {
@@ -580,10 +595,7 @@ pub fn copy_subhypergraph(
     t: &BHyp,
     shared_node: Span, // G <- K -> T
 ) -> Result<BHyp, CopyError> {
-    // Inclusion T -> G
-    let incl = build_inclusion(t, g)?;
-
-    check_copying_conditions(g, t, shared_node.clone())?;
+    check_copying_conditions(t, shared_node.clone())?;
 
     let k_node = shared_node
         .middle()
@@ -607,20 +619,137 @@ pub fn copy_subhypergraph(
             ))
         })?;
 
+    let selected_t_node = shared_node
+        .to_r
+        .map_node(k_node)
+        .ok_or_else(|| {
+            CopyError::InvalidSubhypergraph(format!(
+                "shared_node.to_r does not map distinguished node {:?}",
+                k_node
+            ))
+        })?;
+
+    // Choose the occurrence compatible with the supplied distinguished-node
+    // span; another valid occurrence may map that node elsewhere.
+    let incl = find_all_occurrences(t, g)
+        .into_iter()
+        .find(|morphism| morphism.map_node(selected_t_node) == Some(g_node))
+        .ok_or_else(|| {
+            CopyError::InvalidSubhypergraph(format!(
+                "no inclusion maps distinguished T node {:?} to G node {:?}",
+                selected_t_node, g_node
+            ))
+        })?;
+
     let n = g.out_degree(g_node);
 
-    // if n < 2 {
-    //     return Err(CopyError::InvalidConstruction(format!(
-    //         "copy_subhypergraph requires out_degree({:?}) >= 2, got {}",
-    //         g_node, n
-    //     )));
-    // }
+    // Share free inputs and other context boundary nodes, but keep the
+    // distinguished output separate so each outgoing context edge can use
+    // its own projection slot.
+    let included_edges = incl.edge_image();
+    let t_interface = BHyp_with_interface::from_bhyp(t.clone());
+    let mut shared_t_nodes = t_interface.input_interface_nodes();
+    shared_t_nodes.remove(&selected_t_node);
 
-    // (n·T)* -> T
-    //
-    // compute_n_copies(t, n, None) should build n copies of T glued along
-    // free interface nodes, and projection : (n·T)* -> T.
-    let (_n_copies, projection, _incls) = compute_n_copies(t, n, None)?;
+    let mut context_edges: Vec<EdgeId> = g
+        .edges()
+        .iter()
+        .copied()
+        .filter(|edge| !included_edges.contains(edge))
+        .collect();
+    context_edges.sort();
+
+    let mut outgoing_context_edges = Vec::new();
+    for &g_edge in &context_edges {
+        let sources = g.get_sources_with_binding(g_edge).ok_or_else(|| {
+            CopyError::InvalidSubhypergraph(format!(
+                "context edge {:?} has no sources-with-binding",
+                g_edge
+            ))
+        })?;
+        if sources.iter().any(|swb| swb.source == g_node) {
+            outgoing_context_edges.push(g_edge);
+        }
+    }
+
+    if outgoing_context_edges.len() != n {
+        return Err(CopyError::InvalidSubhypergraph(format!(
+            "expected {} outgoing context edges at {:?}, found {}",
+            n,
+            g_node,
+            outgoing_context_edges.len()
+        )));
+    }
+
+    let mut context_node_slots = HashMap::new();
+    // Slot order follows sorted edge IDs, so equivalent runs route edges
+    // consistently to copy 0, copy 1, and so on.
+    for (slot, &g_edge) in outgoing_context_edges.iter().enumerate() {
+        context_node_slots.insert((g_edge, g_node), slot);
+    }
+
+    for &candidate_t_node in t.nodes() {
+        if candidate_t_node == selected_t_node {
+            continue;
+        }
+
+        if shared_t_nodes.contains(&candidate_t_node) {
+            continue;
+        }
+
+        let g_boundary_node = incl.map_node(candidate_t_node).ok_or_else(|| {
+            CopyError::InvalidSubhypergraph(format!(
+                "inclusion does not map candidate boundary node {:?}",
+                candidate_t_node
+            ))
+        })?;
+
+        let mut has_context_incidence = false;
+        for &g_edge in &context_edges {
+            let sources = g.get_sources_with_binding(g_edge).ok_or_else(|| {
+                CopyError::InvalidSubhypergraph(format!(
+                    "context edge {:?} has no sources-with-binding",
+                    g_edge
+                ))
+            })?;
+            let targets = g.get_targets(g_edge).ok_or_else(|| {
+                CopyError::InvalidSubhypergraph(format!(
+                    "context edge {:?} has no targets",
+                    g_edge
+                ))
+            })?;
+
+            if sources.iter().any(|swb| {
+                swb.source == g_boundary_node || swb.bound.contains(&g_boundary_node)
+            }) || targets.contains(&g_boundary_node)
+            {
+                has_context_incidence = true;
+                break;
+            }
+        }
+
+        if has_context_incidence {
+            shared_t_nodes.insert(candidate_t_node);
+        }
+    }
+
+    let mut boundary = BHyp::new();
+    let mut boundary_to_t_nodes = HashMap::new();
+    let mut ordered_shared_nodes: Vec<NodeId> = shared_t_nodes.into_iter().collect();
+    ordered_shared_nodes.sort();
+    for t_node in ordered_shared_nodes {
+        let boundary_node = boundary.add_node();
+        boundary_to_t_nodes.insert(boundary_node, t_node);
+    }
+    let boundary_to_t = BHypMorphism::new(
+        boundary.clone(),
+        t.clone(),
+        boundary_to_t_nodes,
+        HashMap::new(),
+    )?;
+
+    let (_n_copies, projection, _incls) =
+        compute_n_copies(t, n, Some((boundary, boundary_to_t)))?;
 
     // Pushout complement:
     //
@@ -629,7 +758,11 @@ pub fn copy_subhypergraph(
     //     ▼       ⌟       ▼
     //     G  <───────    Ĝ_T
     //
-    let pc = compute_pushout_complement(&projection, &incl)?;
+    let pc = compute_pushout_complement_with_context_slots(
+        &projection,
+        &incl,
+        &context_node_slots,
+    )?;
 
     Ok(pc.context().clone())
 }

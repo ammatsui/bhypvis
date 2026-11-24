@@ -1032,6 +1032,16 @@ pub fn compute_pushout_complement(
     l: &BHypMorphism, // l: K -> L
     m: &BHypMorphism, // m: L -> G
 ) -> Result<PushoutComplementResult, CategoricalError> {
+    compute_pushout_complement_with_context_slots(l, m, &HashMap::new())
+}
+
+/// Compute a pushout complement while routing selected context-edge
+/// incidences to specific node slots. Unspecified incidences use slot 0.
+pub fn compute_pushout_complement_with_context_slots(
+    l: &BHypMorphism,
+    m: &BHypMorphism,
+    context_node_slots: &HashMap<(EdgeId, NodeId), usize>,
+) -> Result<PushoutComplementResult, CategoricalError> {
     if !same_bhyp(&l.codomain, &m.domain) {
         return Err(CategoricalError::DomainMismatch);
     }
@@ -1504,33 +1514,28 @@ pub fn compute_pushout_complement(
 
         let label = g.get_label(g_e).cloned();
 
+        let context_node = |node: NodeId| -> Result<NodeId, CategoricalError> {
+            let slot = context_node_slots
+                .get(&(g_e, node))
+                .copied()
+                .unwrap_or(0);
+            g_slot_to_c_node.get(&(node, slot)).copied().ok_or_else(|| {
+                CategoricalError::DanglingConditionViolated(format!(
+                    "Context edge {:?} uses node {:?} at missing slot {}",
+                    g_e, node, slot
+                ))
+            })
+        };
+
         let new_swbs: Vec<SourceWithBinding> = swbs
             .iter()
             .map(|swb| {
-                let source = g_slot_to_c_node
-                    .get(&(swb.source, 0))
-                    .copied()
-                    .ok_or_else(|| {
-                        CategoricalError::DanglingConditionViolated(format!(
-                            "Context edge {:?} has source {:?}, but no C node slot 0 exists",
-                            g_e, swb.source
-                        ))
-                    })?;
+                let source = context_node(swb.source)?;
 
                 let bound: Result<Vec<NodeId>, CategoricalError> = swb
                     .bound
                     .iter()
-                    .map(|&b| {
-                        g_slot_to_c_node
-                            .get(&(b, 0))
-                            .copied()
-                            .ok_or_else(|| {
-                                CategoricalError::DanglingConditionViolated(format!(
-                                    "Context edge {:?} binds {:?}, but no C node slot 0 exists",
-                                    g_e, b
-                                ))
-                            })
-                    })
+                    .map(|&b| context_node(b))
                     .collect();
 
                 Ok(SourceWithBinding {
@@ -1542,17 +1547,7 @@ pub fn compute_pushout_complement(
 
         let new_targets: Vec<NodeId> = targets
             .iter()
-            .map(|&t| {
-                g_slot_to_c_node
-                    .get(&(t, 0))
-                    .copied()
-                    .ok_or_else(|| {
-                        CategoricalError::DanglingConditionViolated(format!(
-                            "Context edge {:?} has target {:?}, but no C node slot 0 exists",
-                            g_e, t
-                        ))
-                    })
-            })
+            .map(|&t| context_node(t))
             .collect::<Result<Vec<_>, CategoricalError>>()?;
 
         let c_e = complement
